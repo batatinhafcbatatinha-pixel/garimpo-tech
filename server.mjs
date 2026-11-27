@@ -6,7 +6,9 @@
 //   node server.mjs            → http://localhost:4322
 //   node server.mjs --open     → idem, abrindo o navegador
 //
-// Sem dependências. Rodando no seu PC, Pichau e Terabyte passam pelo Cloudflare (no GitHub não passam).
+// Modo live: botão na página; posts novos do Telegram entram em segundos (scraper/live.mjs).
+//
+// Rodando no seu PC, Pichau e Terabyte passam pelo Cloudflare (no GitHub não passam).
 
 import http from 'node:http';
 import { spawn, exec } from 'node:child_process';
@@ -17,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PORT = +(process.env.PORT || 4322);
 const HOST = process.env.HOST || '127.0.0.1';
-const LOCAL_DIR = join(ROOT, 'data', 'local');
+const LOCAL_DIR = process.env.GARIMPO_LOCAL_DIR || join(ROOT, 'data', 'local');
 const DATA = join(LOCAL_DIR, 'deals.json');
 const SETTINGS = join(LOCAL_DIR, 'settings.json');
 const INTERVALS = [0, 10, 15, 30, 60, 180, 360, 720, 1440]; // minutos; 0 = desligado
@@ -33,13 +35,13 @@ const TYPES = {
   '.webmanifest': 'application/manifest+json',
 };
 
-let settings = { every: 30, f5: false, ntfyTopic: '' };
+let settings = { every: 30, f5: false, ntfyTopic: '', live: false };
 const state = { running: false, startedAt: null, lastEnd: null, lastOk: null, lastError: null, nextAt: null, progress: '' };
 const clients = new Set();
 let timer = null;
 
 const log = (...a) => console.log(new Date().toLocaleTimeString('pt-BR'), ...a);
-const status = () => ({ ...state, every: settings.every, f5: !!settings.f5, intervals: INTERVALS });
+const status = () => ({ ...state, every: settings.every, f5: !!settings.f5, intervals: INTERVALS, live: live ? live.status() : null });
 
 function send(event, data) {
   const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -58,6 +60,28 @@ async function loadSettings() {
   }
 }
 const saveSettings = () => mkdir(LOCAL_DIR, { recursive: true }).then(() => writeFile(SETTINGS, JSON.stringify(settings, null, 2)));
+
+// ------------------------------------------------------------------ live (Telegram)
+// O import do coletor fica depois de DATA_FILE definido; o live grava no mesmo data/local.
+process.env.DATA_FILE ||= DATA;
+const { createLive } = await import('./scraper/live.mjs');
+const { TG_CHANNELS } = await import('./scraper/scrape.mjs');
+const live = createLive({
+  localDir: LOCAL_DIR,
+  channels: TG_CHANNELS,
+  getTopic: () => settings.ntfyTopic || '',
+  log: (...a) => log(...a),
+  ...(process.env.GARIMPO_LIVE_OFFLINE ? { fetchText: async () => { throw new Error('offline'); } } : {}),
+  onChange: () => {
+    send('live', live.status());
+  },
+});
+// cada leva de posts gravada: a página recarrega os dados (o mesmo evento das fontes da coleta)
+const handlePosts = live.handlePosts;
+live.handlePosts = async (p) => {
+  await handlePosts(p);
+  send('partial', { at: new Date().toISOString(), live: true });
+};
 
 // ------------------------------------------------------------------ coleta
 function collect() {
@@ -97,8 +121,12 @@ function collect() {
     state.lastError = code === 0 ? null : errTail.trim().split('\n').pop() || `saiu com código ${code}`;
     state.progress = '';
     log(code === 0 ? 'coleta concluída' : `coleta falhou: ${state.lastError}`);
-    if (code === 0) send('updated', { at: state.lastEnd });
-    schedule();
+    const done = () => {
+      if (code === 0) send('updated', { at: state.lastEnd });
+      schedule();
+    };
+    // a coleta regravou o deals.json a partir do que leu no começo: devolve o que o live trouxe nesse meio-tempo
+    live.reapplyAfterCollect(state.startedAt).catch((e) => log('live: reaplicar falhou', e.message)).finally(done);
   });
 }
 
@@ -140,9 +168,54 @@ async function serveFile(res, file) {
   }
 }
 
+const readBody = async (req) => {
+  let body = '';
+  for await (const chunk of req) body += chunk;
+  return JSON.parse(body || '{}');
+};
+// Só a própria página pode mandar comandos (POST). Outro site aberto no navegador não pode,
+// ainda mais os de login do Telegram.
+const sameOrigin = (req) => {
+  const o = req.headers.origin;
+  return !o || o === `http://localhost:${PORT}` || o === `http://127.0.0.1:${PORT}`;
+};
+
+async function liveApi(p, req, res) {
+  if (p === '/api/live' && req.method === 'GET') return json(res, 200, live.status());
+  if (req.method !== 'POST') return json(res, 405, { error: 'use POST' });
+  let j;
+  try {
+    j = await readBody(req);
+  } catch {
+    return json(res, 400, { error: 'JSON inválido' });
+  }
+  try {
+    if (p === '/api/live') {
+      settings.live = !!j.on;
+      await saveSettings();
+      if (settings.live) await live.start();
+      else live.stop();
+      log(`modo live: ${settings.live ? 'ligado' : 'desligado'}`);
+      return json(res, 200, live.status());
+    }
+    if (p === '/api/telegram/login') return json(res, 200, { ...(await live.login(j)), live: live.status() });
+    if (p === '/api/telegram/code') return json(res, 200, { ...(await live.code(j.code)), live: live.status() });
+    if (p === '/api/telegram/password') return json(res, 200, { ...(await live.password(j.password)), live: live.status() });
+    if (p === '/api/telegram/logout') return await live.logout(), json(res, 200, live.status());
+    if (p === '/api/telegram/join') return await live.join(j.channel), json(res, 200, live.status());
+  } catch (e) {
+    // mensagem do Telegram (ex.: PHONE_CODE_INVALID) volta para a página; nunca a sessão
+    return json(res, 400, { error: e.message, live: live.status() });
+  }
+  return json(res, 404, { error: 'não encontrado' });
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const p = decodeURIComponent(url.pathname);
+
+  if (req.method === 'POST' && !sameOrigin(req)) return json(res, 403, { error: 'origem não permitida' });
+  if (p === '/api/live' || p.startsWith('/api/telegram/')) return liveApi(p, req, res);
 
   if (p === '/api/status') return json(res, 200, status());
 
@@ -200,6 +273,7 @@ const server = http.createServer(async (req, res) => {
 
 await loadSettings();
 server.listen(PORT, HOST, async () => {
+  if (settings.live) live.start().catch((e) => log('live não ligou', e.message));
   const url = `http://localhost:${PORT}/`;
   log(`Garimpo local em ${url}  (coleta: ${settings.every ? `a cada ${settings.every} min` : 'desligada'})`);
   if (process.argv.includes('--open')) exec(process.platform === 'win32' ? `start "" "${url}"` : `xdg-open "${url}"`);
