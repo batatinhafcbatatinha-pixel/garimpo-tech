@@ -46,6 +46,12 @@
           <input type="checkbox" id="f5" />
           <span>F5 coleta</span>
         </label>
+        <button class="every every--live" id="liveBtn" type="button" aria-pressed="false" title="Modo live: posts novos dos canais do Telegram entram na hora" hidden>
+          <i></i><span>Live</span>
+        </button>
+        <button class="iconbtn" id="tgBtn" type="button" aria-label="Telegram do modo live" title="Telegram do modo live" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 4-18 7 6 2 2 6 3-4 5 4z"/><path d="m9 13 12-9"/></svg>
+        </button>
         <button class="iconbtn" id="themeBtn" aria-label="Alternar tema" title="Tema">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
         </button>
@@ -205,6 +211,58 @@
     </form>
   </dialog>
 
+  <!-- Modo live: conta do Telegram (só versão local) -->
+  <dialog class="sheet" id="tgSheet" aria-labelledby="tgTitle">
+    <div class="sheet__in">
+      <header>
+        <div>
+          <p class="eyebrow">Modo live</p>
+          <h2 id="tgTitle">Telegram</h2>
+        </div>
+        <button class="iconbtn" type="button" id="tgClose" aria-label="Fechar">✕</button>
+      </header>
+      <p class="hint is-warn" id="tgError" hidden></p>
+
+      <form class="tglogin" id="tgLogin" hidden>
+        <p class="tgintro">Com a sua conta, o Telegram manda cada post na hora, sem o Garimpo ficar consultando os canais. Sem conta, o live lê a prévia pública de cada canal a cada minuto, mais ou menos.</p>
+        <p class="tgintro">O Garimpo só <b>lê</b> os canais da lista. Ele não manda mensagem e não entra em canal sem você clicar em <b>Seguir</b>. A sessão fica só neste PC, em <code>data/local/</code>.</p>
+        <div data-step="creds">
+          <p class="hint">1. Entre em <a href="https://my.telegram.org/apps" target="_blank" rel="noopener">my.telegram.org/apps</a>, crie um app (qualquer nome) e copie o <b>api_id</b> e o <b>api_hash</b>.</p>
+          <div class="price tgfields">
+            <label><span>api_id</span><input id="tgApiId" inputmode="numeric" autocomplete="off" /></label>
+            <label><span>api_hash</span><input id="tgApiHash" autocomplete="off" spellcheck="false" /></label>
+          </div>
+          <p class="hint">2. Seu telefone, com DDI (ex.: +5511999998888). O código chega no app do Telegram.</p>
+          <div class="price tgfields"><label><span>tel</span><input id="tgPhone" inputmode="tel" autocomplete="tel" placeholder="+55…" /></label></div>
+        </div>
+        <div data-step="code" hidden>
+          <p class="hint">Digite o código que chegou no Telegram.</p>
+          <div class="price tgfields"><label><span>código</span><input id="tgCode" inputmode="numeric" autocomplete="one-time-code" /></label></div>
+        </div>
+        <div data-step="password" hidden>
+          <p class="hint">Sua conta tem verificação em duas etapas: digite a senha.</p>
+          <div class="price tgfields"><label><span>senha</span><input id="tgPass" type="password" autocomplete="current-password" /></label></div>
+        </div>
+        <footer>
+          <button type="button" class="btn btn--ghost" id="tgNoAccount">Usar sem conta</button>
+          <button class="btn" id="tgNext">Enviar código</button>
+        </footer>
+      </form>
+
+      <section id="tgConnected" hidden>
+        <p class="tgintro">Conectado como <b id="tgUser"></b>.</p>
+      </section>
+
+      <section class="fgroup">
+        <h3>Canais</h3>
+        <ul class="tgch" id="tgChannels"></ul>
+      </section>
+      <footer id="tgFoot" hidden>
+        <button type="button" class="btn btn--ghost" id="tgLogout">Sair da conta</button>
+      </footer>
+    </div>
+  </dialog>
+
   <div class="toast" id="toast" role="status" hidden></div>
   <div class="scrim" id="scrim" hidden></div>
 
@@ -224,6 +282,7 @@
           <strong class="now"></strong>
           <span class="save"></span>
         </div>
+        <p class="hist" hidden></p>
         <div class="card__actions">
           <button class="coupon" type="button" hidden><span>CUPOM</span><b></b><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg></button>
           <a class="go" target="_blank" rel="noopener sponsored">Ver oferta <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg></a>

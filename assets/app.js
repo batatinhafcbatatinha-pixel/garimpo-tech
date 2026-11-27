@@ -361,6 +361,14 @@ function card(d) {
     c.title = 'Copiar cupom';
     c.onclick = () => copy(d.coupon, c);
   }
+  if (d.hist) {
+    // conferido contra o histórico de preços (o nosso, ou o do Zoom/Buscapé enquanto o nosso enche)
+    const h = $('.hist', el);
+    h.hidden = false;
+    const src = d.hist.source === 'nosso' ? 'histórico próprio' : d.hist.source.includes('buscape') ? 'Buscapé' : 'Zoom';
+    h.textContent = `menor em 30 dias R$ ${brl(d.hist.min30)} · mediana R$ ${brl(d.hist.median30)} · ${src}`;
+    h.title = `Desconto conferido contra ${d.hist.days} dias de preço antes da oferta aparecer`;
+  }
   if (d.ref) {
     const r = $('.ref', el);
     r.hidden = false;
@@ -659,10 +667,16 @@ function renderStats() {
   up.classList.toggle('is-stale', !!stale);
   $('span', up).textContent = META.updatedAt ? `atualizado ${ago(META.updatedAt)}` : 'sem dados';
   const src = META.sources || {};
-  const names = { promobit: 'Promobit', kabum: 'KaBuM API', amazon: 'Amazon', patoloco: 'Pato Loco', pichau: 'Pichau', terabyte: 'Terabyte', telegram: 'Telegram' };
+  const names = { promobit: 'Promobit', kabum: 'KaBuM API', amazon: 'Amazon', patoloco: 'Pato Loco', pichau: 'Pichau', terabyte: 'Terabyte', telegram: 'Telegram', live: 'Live' };
   $('#sourceStatus').innerHTML = Object.entries(src)
+    .filter(([k]) => k !== 'historico')
     .map(([k, v]) => `<span class="src ${v.ok ? '' : 'is-off'}">${names[k] || k}: ${v.ok ? `${v.count}` : 'fora do ar'}</span>`)
     .join('');
+  if (META.removedInflated > 0)
+    $('#sourceStatus').insertAdjacentHTML(
+      'beforeend',
+      `<span class="src is-warn" title="O preço &quot;de&quot; anunciado não bate com o histórico de preços">${META.removedInflated} ofertas removidas por preço inflado</span>`
+    );
 }
 
 function syncInputs() {
@@ -925,6 +939,127 @@ function paintCollector() {
   }
   $('#every').value = String(LOCAL.every);
   $('#f5').checked = !!LOCAL.f5;
+  paintLive();
+}
+
+// ------------------------------------------------------------------ modo live (Telegram)
+const agoSec = (iso) => {
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso)) / 1000));
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)} min` : `${Math.round(s / 3600)} h`;
+};
+function paintLive() {
+  const L = LOCAL?.live;
+  const b = $('#liveBtn');
+  if (!L) return;
+  b.classList.toggle('is-on', !!L.on);
+  b.setAttribute('aria-pressed', String(!!L.on));
+  const how = L.mode === 'account' ? `pela sua conta (${L.user})` : 'pela prévia pública t.me/s';
+  b.title = L.on
+    ? `Live ligado, ${how}. ${L.lastPostAt ? `Último post há ${agoSec(L.lastPostAt)}.` : 'Esperando o primeiro post novo.'} Clique para desligar.`
+    : 'Modo live: posts novos dos canais do Telegram entram na hora. Clique para ligar.';
+  $('#tgBtn').classList.toggle('is-warn', !!L.error);
+  if ($('#tgSheet').open) paintTg();
+}
+async function liveApi(path, body) {
+  const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
+  const j = await r.json().catch(() => ({}));
+  if (LOCAL) LOCAL.live = j.live || (j.channels ? j : LOCAL.live);
+  paintLive();
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+function paintTg() {
+  const L = LOCAL?.live || {};
+  const err = $('#tgError');
+  const logged = L.mode === 'account';
+  let msg = L.error || '';
+  if (L.gramjs === false && !msg) msg = 'Para entrar com sua conta, rode "npm install" na pasta do Garimpo. Sem conta, o live funciona pela prévia pública.';
+  err.hidden = !msg;
+  err.textContent = msg;
+  $('#tgLogin').hidden = logged || L.gramjs === false;
+  $('#tgConnected').hidden = !logged;
+  $('#tgFoot').hidden = !logged;
+  if (logged) $('#tgUser').textContent = L.user;
+  const step = L.loginStep || 'creds';
+  for (const el of document.querySelectorAll('#tgLogin [data-step]')) el.hidden = el.dataset.step !== step;
+  $('#tgNext').textContent = step === 'creds' ? 'Enviar código' : 'Entrar';
+  $('#tgChannels').replaceChildren(
+    ...(L.channels || []).map((c) => {
+      const li = document.createElement('li');
+      const a = Object.assign(document.createElement('a'), { href: `https://t.me/${c.name}`, target: '_blank', rel: 'noopener', textContent: `@${c.name}` });
+      const st = document.createElement('span');
+      st.className = 'muted';
+      st.textContent = c.paused
+        ? `pausado até ${new Date(c.until).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+        : c.joined
+          ? 'na hora, pela sua conta'
+          : 'pela prévia t.me/s';
+      li.append(a, st);
+      if (logged && !c.joined) {
+        const btn = Object.assign(document.createElement('button'), { type: 'button', className: 'btn btn--ghost btn--sm', textContent: 'Seguir' });
+        btn.title = `Entrar no canal @${c.name} com a sua conta, para os posts chegarem na hora`;
+        btn.onclick = async () => {
+          btn.disabled = true;
+          try {
+            await liveApi('api/telegram/join', { channel: c.name });
+            toast(`Seguindo @${c.name}`);
+          } catch (e) {
+            toast(`Não consegui seguir: ${e.message}`);
+            btn.disabled = false;
+          }
+        };
+        li.append(btn);
+      }
+      return li;
+    })
+  );
+}
+function setupLive() {
+  $('#liveBtn').hidden = false;
+  $('#tgBtn').hidden = false;
+  $('#liveBtn').onclick = async () => {
+    const on = !LOCAL?.live?.on;
+    try {
+      await liveApi('api/live', { on });
+      toast(on ? 'Live ligado: posts novos do Telegram entram na hora' : 'Live desligado');
+    } catch {
+      toast('Não consegui mudar o modo live');
+    }
+  };
+  const tg = $('#tgSheet');
+  $('#tgBtn').onclick = () => {
+    paintTg();
+    tg.showModal();
+  };
+  $('#tgClose').onclick = () => tg.close();
+  tg.addEventListener('click', (e) => { if (e.target === tg) tg.close(); });
+  $('#tgNoAccount').onclick = () => tg.close();
+  $('#tgLogout').onclick = async () => {
+    try {
+      await liveApi('api/telegram/logout');
+      toast('Saiu da conta. O live segue pela prévia pública.');
+    } catch (e) {
+      toast(`Erro: ${e.message}`);
+    }
+  };
+  $('#tgLogin').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const step = LOCAL?.live?.loginStep || 'creds';
+    const btn = $('#tgNext');
+    btn.disabled = true;
+    try {
+      if (step === 'creds') await liveApi('api/telegram/login', { apiId: $('#tgApiId').value.trim(), apiHash: $('#tgApiHash').value.trim(), phone: $('#tgPhone').value.trim() });
+      else if (step === 'code') await liveApi('api/telegram/code', { code: $('#tgCode').value });
+      else await liveApi('api/telegram/password', { password: $('#tgPass').value });
+      if (LOCAL?.live?.mode === 'account') toast(`Conectado como ${LOCAL.live.user}`);
+    } catch (err) {
+      toast(`Telegram: ${err.message}`);
+    } finally {
+      $('#tgPass').value = '';
+      btn.disabled = false;
+      paintTg();
+    }
+  });
 }
 
 // Recarrega os dados que o servidor local já tem (parciais ou finais) e mostra na hora.
@@ -955,6 +1090,7 @@ async function connectLocal() {
   }
   $('#everyBox').hidden = false;
   $('#f5Box').hidden = false;
+  setupLive();
   paintCollector();
   $('#every').addEventListener('change', async (e) => {
     const every = +e.target.value;
@@ -975,6 +1111,7 @@ async function connectLocal() {
   });
   const es = new EventSource('api/events');
   es.addEventListener('status', (ev) => { LOCAL = JSON.parse(ev.data); paintCollector(); });
+  es.addEventListener('live', (ev) => { if (LOCAL) { LOCAL.live = JSON.parse(ev.data); paintLive(); } });
   es.addEventListener('progress', (ev) => { if (LOCAL) { LOCAL.progress = JSON.parse(ev.data).progress; paintCollector(); } });
   // uma fonte terminou: o que ela trouxe aparece na hora, sem esperar o resto
   es.addEventListener('partial', () => refreshFromServer());
