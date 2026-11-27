@@ -630,11 +630,8 @@ function skeletons() {
 
 // ------------------------------------------------------------------ alertas
 const NDEF = { on: false, min: 60, max: 100, cats: [], maxPrice: '', radar: false, coupons: false };
-// De quanto em quanto tempo a página rebusca os dados (0 = só no F5). Vale para a lista e para os alertas.
-let EVERY = +store.get('every', 15);
 let N = { ...NDEF, ...store.get('alerts', {}) };
 let seen = new Set(store.get('seen', []));
-let pollT;
 
 const sheet = $('#notifSheet');
 function paintDual() {
@@ -668,11 +665,8 @@ function openSheet() {
   $('#nRadar').checked = !!N.radar;
   $('#nCoupons').checked = !!N.coupons;
   nCatsSel = [...N.cats];
-  const h = $('#nEveryHint');
-  h.textContent = EVERY
-    ? `Os alertas checam junto com a atualização da página (${$('#every').selectedOptions[0].text}). Funciona com o site aberto, mesmo em segundo plano. Dica: instale como app pelo menu do Chrome.`
-    : 'A página está em “Só no F5”: os alertas só chegam quando você atualizar. Escolha um intervalo no topo da página para receber sozinho.';
-  h.className = `hint ${EVERY ? '' : 'is-warn'}`;
+  $('#nEveryHint').textContent =
+    'Nesta versão online a coleta é diária (09:00) e os alertas são checados quando você abre a página. Para aviso na hora, use o app ntfy abaixo ou a versão local.';
   paintDual();
   permText();
   renderNCats();
@@ -715,7 +709,6 @@ $('#notifForm').addEventListener('submit', async (e) => {
   // ao ativar, o que já está na tela conta como visto — só avisamos do que for novo
   if (N.on) { [...ALL, ...RADAR, ...COUPONS].forEach((d) => seen.add(d.id)); saveSeen(); }
   sheet.close();
-  armPolling();
   paintBell();
   toast(N.on ? `Alertas ligados: ${N.min}–${N.max}% · ${N.cats.length ? N.cats.map((c) => CATS.find((x) => x.id === c).short).join(', ') : 'todas as categorias'}` : 'Alertas desligados');
 });
@@ -776,68 +769,10 @@ async function checkAlerts() {
 }
 function paintBell() { $('#notifDot').hidden = !N.on; }
 
-// ------------------------------------------------------------------ modo local (node server.mjs)
-// O servidor local coleta no intervalo escolhido aqui e avisa a página assim que termina;
-// as ofertas novas aparecem na hora, sem precisar atualizar. No GitHub Pages a coleta é diária.
-let LOCAL = null; // status do servidor local, ou null no site publicado
-const fmtMin = (iso) => {
-  const m = Math.round((new Date(iso) - Date.now()) / 60000);
-  return m <= 0 ? 'agora' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`;
-};
+// ------------------------------------------------------------------ status da coleta
+// Versão online: a coleta roda uma vez por dia no GitHub Actions; F5 sempre traz o mais recente.
 function paintCollector() {
-  const up = $('#updated');
-  const label = $('span', up);
-  if (!LOCAL) {
-    up.classList.remove('is-running');
-    label.textContent = META.updatedAt ? `atualizado ${ago(META.updatedAt)} · coleta diária` : 'sem dados';
-    return;
-  }
-  up.classList.toggle('is-running', !!LOCAL.running);
-  if (LOCAL.running) {
-    label.textContent = 'coletando…';
-    up.title = LOCAL.progress || 'Coletando ofertas nas lojas';
-  } else {
-    const parts = [META.updatedAt ? `atualizado ${ago(META.updatedAt)}` : 'sem dados'];
-    if (LOCAL.nextAt) parts.push(`próxima em ${fmtMin(LOCAL.nextAt)}`);
-    label.textContent = parts.join(' · ');
-    up.title = LOCAL.lastError ? `Última coleta falhou: ${LOCAL.lastError}` : 'Última atualização dos dados';
-  }
-  $('#every').value = String(LOCAL.every);
-}
-
-async function connectLocal() {
-  try {
-    const r = await fetch('api/status', { cache: 'no-store' });
-    if (!r.ok) return false;
-    LOCAL = await r.json();
-  } catch {
-    return false;
-  }
-  $('#everyBox').hidden = false;
-  paintCollector();
-  $('#every').addEventListener('change', async (e) => {
-    const every = +e.target.value;
-    const r = await fetch('api/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ every }) });
-    if (r.ok) {
-      LOCAL = await r.json();
-      paintCollector();
-      toast(every ? `Coletando ${e.target.selectedOptions[0].text}` : 'Coleta automática desligada');
-    } else toast('Não consegui salvar o intervalo');
-  });
-  const es = new EventSource('api/events');
-  es.addEventListener('status', (ev) => { LOCAL = JSON.parse(ev.data); paintCollector(); });
-  es.addEventListener('progress', (ev) => { if (LOCAL) { LOCAL.progress = JSON.parse(ev.data).progress; paintCollector(); } });
-  // coleta terminou: mostra na hora
-  es.addEventListener('updated', async () => {
-    try {
-      await load();
-      renderStats();
-      update();
-      toast(`Coleta concluída: ${ALL.length} ofertas 50%+, ${RADAR.length} no radar`);
-      await checkAlerts();
-    } catch {}
-  });
-  return true;
+  $('span', $('#updated')).textContent = META.updatedAt ? `atualizado ${ago(META.updatedAt)} · coleta diária` : 'sem dados';
 }
 
 // ------------------------------------------------------------------ boot
@@ -845,7 +780,6 @@ async function connectLocal() {
   syncInputs();
   skeletons();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
-  const isLocal = /^(localhost|127\.|192\.168\.|10\.)/.test(location.hostname) && (await connectLocal());
   try {
     await load();
   } catch {
@@ -853,9 +787,8 @@ async function connectLocal() {
   }
   renderStats();
   paintCollector();
-  if (!ALL.length && !RADAR.length && isLocal && LOCAL?.running) $('#updated span').textContent = 'primeira coleta… (leva alguns minutos)';
   update();
   paintBell();
   checkAlerts();
-  setInterval(() => { renderStats(); paintCollector(); }, 30000);
+  setInterval(() => { renderStats(); paintCollector(); }, 60000);
 })();
