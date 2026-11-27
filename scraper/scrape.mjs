@@ -585,6 +585,27 @@ function parseTelegramPost(text, meta) {
   });
 }
 
+// Prévia pública t.me/s/<canal> → posts (texto já convertido por tgText).
+// withEmpty: inclui posts sem texto (só foto), para a paginação por "before" não pular ids.
+function parseTmePage(html, { withEmpty = false } = {}) {
+  const out = [];
+  for (const p of html.split('tgme_widget_message_wrap').slice(1)) {
+    const dp = /data-post="([^"/]+)\/(\d+)"/.exec(p);
+    if (!dp) continue;
+    const body = /tgme_widget_message_text[^>]*>([\s\S]*?)<\/div>/.exec(p)?.[1];
+    if (!body && !withEmpty) continue;
+    const dt = /datetime="([^"]+)"/.exec(p)?.[1];
+    out.push({
+      channel: dp[1],
+      postId: +dp[2],
+      postedAt: dt ? new Date(dt).toISOString() : null,
+      image: /tgme_widget_message_photo_wrap[^>]*background-image:url\('([^']+)'\)/.exec(p)?.[1] || null,
+      text: body ? tgText(body) : '',
+    });
+  }
+  return out;
+}
+
 async function telegram() {
   const out = [];
   let ok = 0;
@@ -595,21 +616,13 @@ async function telegram() {
         try {
           const html = await get(`https://t.me/s/${ch}${before ? `?before=${before}` : ''}`);
           ok++;
-          const posts = html.split('tgme_widget_message_wrap').slice(1);
+          const posts = parseTmePage(html, { withEmpty: true });
           if (!posts.length) break;
           let minId = Infinity;
           for (const p of posts) {
-            const dp = /data-post="([^"/]+)\/(\d+)"/.exec(p);
-            if (!dp) continue;
-            minId = Math.min(minId, +dp[2]);
-            const body = /tgme_widget_message_text[^>]*>([\s\S]*?)<\/div>/.exec(p)?.[1];
-            if (!body) continue;
-            const d = parseTelegramPost(tgText(body), {
-              channel: dp[1],
-              postId: dp[2],
-              postedAt: /datetime="([^"]+)"/.exec(p)?.[1] ? new Date(/datetime="([^"]+)"/.exec(p)[1]).toISOString() : null,
-              image: /tgme_widget_message_photo_wrap[^>]*background-image:url\('([^']+)'\)/.exec(p)?.[1] || null,
-            });
+            minId = Math.min(minId, p.postId);
+            if (!p.text) continue;
+            const d = parseTelegramPost(p.text, p);
             if (d) out.push(d);
           }
           if (!isFinite(minId)) break;
@@ -809,8 +822,8 @@ async function ntfy(topic, { title, body, prio = 3, tags, click, image }) {
 
 // Push para o celular (app ntfy). Tópicos: <base> e <base>-<categoria> para 50%+,
 // <base>-radar para posts de cupom em hardware, <base>-cupons para cupons de loja.
-async function notify(newDeals, newRadar, newCoupons) {
-  if (!NTFY_TOPIC) return;
+async function notify(newDeals, newRadar, newCoupons, topic = NTFY_TOPIC) {
+  if (!topic) return;
   const best = newDeals.filter((d) => d.discount >= NTFY_MIN).sort((a, b) => b.discount - a.discount).slice(0, 15);
   for (const d of best) {
     const msg = {
@@ -821,11 +834,11 @@ async function notify(newDeals, newRadar, newCoupons) {
       click: d.url,
       image: d.image,
     };
-    await ntfy(NTFY_TOPIC, msg);
-    await ntfy(`${NTFY_TOPIC}-${d.category}`, msg);
+    await ntfy(topic, msg);
+    await ntfy(`${topic}-${d.category}`, msg);
   }
   for (const d of newRadar.slice(0, 15)) {
-    await ntfy(`${NTFY_TOPIC}-radar`, {
+    await ntfy(`${topic}-radar`, {
       title: d.title,
       body: `R$ ${money(d.price)}${d.coupon ? ` com cupom ${d.coupon}` : ''} • ${STORES[d.store]}${d.via ? ` • ${d.via}` : ''}`,
       tags: `${d.category},${d.store},radar`,
@@ -834,7 +847,7 @@ async function notify(newDeals, newRadar, newCoupons) {
     });
   }
   for (const c of newCoupons.slice(0, 10)) {
-    await ntfy(`${NTFY_TOPIC}-cupons`, { title: `Cupom ${STORES[c.store]}: ${c.code}`, body: c.title || c.discount || '', tags: `ticket,${c.store}`, click: c.url });
+    await ntfy(`${topic}-cupons`, { title: `Cupom ${STORES[c.store]}: ${c.code}`, body: c.title || c.discount || '', tags: `ticket,${c.store}`, click: c.url });
   }
   const n = best.length + Math.min(15, newRadar.length) + Math.min(10, newCoupons.length);
   if (n) log(`ntfy: ${n} notificações enviadas`);
@@ -1073,7 +1086,15 @@ async function main() {
   );
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+export {
+  makeDeal, parseTelegramPost, parseTmePage, tgText, build, save, notify, get, browserHtml, log, sleep, dedupe,
+  EXPIRED_IDS, EXPIRED_CODES, COUPONS, REFS, TG_CHANNELS, MIN_DISCOUNT, KEEP_HOURS,
+};
+
+// só coleta quando executado direto (node scraper/scrape.mjs); importado pelo servidor ou pelos testes, não
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
