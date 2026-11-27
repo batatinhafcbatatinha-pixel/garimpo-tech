@@ -55,7 +55,7 @@ test('post de produto entra na hora; "Esgotou CÓDIGO" tira a oferta', async () 
 test('depois da coleta completa, o que o live trouxe volta (e o esgotado continua fora)', async () => {
   const d = dir();
   const live = mk(d);
-  const since = new Date(Date.now() - 1000).toISOString();
+  const since = new Date(NOW.getTime() - 1000).toISOString(); // o live deste teste usa o relógio fixo NOW
   await live.handlePosts([post(10, PRODUTO.replace('LIVE5700', 'OUTRO123'))]);
   await live.handlePosts([post(11, PRODUTO.replace('5700X', '5600X').replace('LIVE5700', 'ACABA999'))]);
   const gone = read(d).radar.find((x) => x.id === 'tg-canalteste-11');
