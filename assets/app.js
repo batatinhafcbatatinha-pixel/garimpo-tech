@@ -629,7 +629,9 @@ function skeletons() {
 }
 
 // ------------------------------------------------------------------ alertas
-const NDEF = { on: false, min: 60, max: 100, cats: [], maxPrice: '', every: 15, radar: false, coupons: false };
+const NDEF = { on: false, min: 60, max: 100, cats: [], maxPrice: '', radar: false, coupons: false };
+// De quanto em quanto tempo a página rebusca os dados (0 = só no F5). Vale para a lista e para os alertas.
+let EVERY = +store.get('every', 15);
 let N = { ...NDEF, ...store.get('alerts', {}) };
 let seen = new Set(store.get('seen', []));
 let pollT;
@@ -666,7 +668,11 @@ function openSheet() {
   $('#nRadar').checked = !!N.radar;
   $('#nCoupons').checked = !!N.coupons;
   nCatsSel = [...N.cats];
-  $$('input[name=nint]').forEach((r) => (r.checked = +r.value === +N.every));
+  const h = $('#nEveryHint');
+  h.textContent = EVERY
+    ? `Os alertas checam junto com a atualização da página (${$('#every').selectedOptions[0].text}). Funciona com o site aberto, mesmo em segundo plano. Dica: instale como app pelo menu do Chrome.`
+    : 'A página está em “Só no F5”: os alertas só chegam quando você atualizar. Escolha um intervalo no topo da página para receber sozinho.';
+  h.className = `hint ${EVERY ? '' : 'is-warn'}`;
   paintDual();
   permText();
   renderNCats();
@@ -698,7 +704,6 @@ $('#notifForm').addEventListener('submit', async (e) => {
     max: +$('#nMax').value,
     cats: nCatsSel,
     maxPrice: $('#nMaxPrice').value,
-    every: +($$('input[name=nint]').find((r) => r.checked)?.value || 15),
     radar: $('#nRadar').checked,
     coupons: $('#nCoupons').checked,
   };
@@ -750,9 +755,14 @@ async function showNotif(d) {
   n.onclick = () => window.open(opts.data.url, '_blank');
 }
 
+let lastLoad = Date.now();
 async function poll() {
   try {
+    const before = META.updatedAt;
     await load();
+    lastLoad = Date.now();
+    if (META.updatedAt !== before) { renderStats(); update(); } else renderStats();
+    if (!N.on) return;
     const fresh = ALL.filter((d) => !seen.has(d.id));
     const freshRadar = RADAR.filter((d) => !seen.has(d.id));
     const freshCoupons = COUPONS.filter((c) => !seen.has(c.id));
@@ -768,13 +778,23 @@ async function poll() {
     const hits = fresh.filter(matchAlert).sort(SORTS.disc);
     for (const d of hits.slice(0, 5)) await showNotif(d);
     if (hits.length > 5) showNotif({ id: 'more', discount: hits[5].discount, title: `+${hits.length - 5} ofertas novas no Garimpo`, price: hits[5].price, oldPrice: hits[5].oldPrice, store: hits[5].store, url: location.href });
-    if (fresh.length) { renderStats(); update(); }
   } catch {}
 }
 function armPolling() {
   clearInterval(pollT);
-  if (N.on) pollT = setInterval(poll, N.every * 60000);
+  if (EVERY) pollT = setInterval(poll, EVERY * 60000);
 }
+$('#every').value = String(EVERY);
+$('#every').addEventListener('change', (e) => {
+  EVERY = +e.target.value;
+  store.set('every', EVERY);
+  armPolling();
+  toast(EVERY ? `A página vai buscar ofertas novas ${e.target.selectedOptions[0].text}` : 'Atualização automática desligada — use F5');
+});
+// voltou para a aba depois de muito tempo: atualiza na hora
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && EVERY && Date.now() - lastLoad > EVERY * 60000) poll();
+});
 function paintBell() { $('#notifDot').hidden = !N.on; }
 
 // ------------------------------------------------------------------ boot
@@ -791,6 +811,7 @@ function paintBell() { $('#notifDot').hidden = !N.on; }
   renderStats();
   update();
   paintBell();
-  if (N.on) { armPolling(); poll(); }
+  armPolling();
+  if (N.on) poll();
   setInterval(() => { renderStats(); }, 60000);
 })();

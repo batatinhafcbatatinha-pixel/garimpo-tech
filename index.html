@@ -27,6 +27,16 @@
       </label>
       <div class="topbar__right">
         <span class="live" id="updated" title="Última atualização dos dados"><i></i><span>carregando…</span></span>
+        <label class="every" title="De quanto em quanto tempo a página busca ofertas novas (F5 também atualiza)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+          <select id="every" aria-label="Atualizar a cada">
+            <option value="0">Só no F5</option>
+            <option value="5">a cada 5 min</option>
+            <option value="15">a cada 15 min</option>
+            <option value="30">a cada 30 min</option>
+            <option value="60">a cada 1 h</option>
+          </select>
+        </label>
         <button class="iconbtn" id="themeBtn" aria-label="Alternar tema" title="Tema">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
         </button>
@@ -171,15 +181,7 @@
         <div class="price"><label><span>R$</span><input id="nMaxPrice" inputmode="numeric" placeholder="sem limite" /></label></div>
       </section>
 
-      <section class="fgroup">
-        <h3>Checar a cada</h3>
-        <div class="seg" id="nInterval">
-          <label><input type="radio" name="nint" value="5" /><span>5 min</span></label>
-          <label><input type="radio" name="nint" value="15" checked /><span>15 min</span></label>
-          <label><input type="radio" name="nint" value="30" /><span>30 min</span></label>
-        </div>
-        <p class="hint">Funciona com o site aberto (pode ficar em segundo plano). Dica: instale como app pelo menu do Chrome.</p>
-      </section>
+      <p class="hint" id="nEveryHint"></p>
 
       <section class="phone" id="phoneBox" hidden>
         <h3>📱 No celular, com o site fechado</h3>

@@ -622,10 +622,11 @@ function browserOnce(url, waitMs) {
 }
 async function browserHtml(url, { waitMs = 15000, ok } = {}) {
   if (!BROWSER) throw new Error('nenhum Chrome/Edge encontrado');
-  for (let i = 0; i < 2; i++) {
-    const html = await slot(() => browserOnce(url, waitMs)).catch((e) => (i ? Promise.reject(e) : ''));
+  // o desafio do Cloudflare às vezes passa na 2ª/3ª tentativa, com mais tempo para o JS rodar
+  for (let i = 0; i < 3; i++) {
+    const html = await slot(() => browserOnce(url, waitMs + i * 10000)).catch((e) => (i === 2 ? Promise.reject(e) : ''));
     if (html && (!ok || ok(html))) return html;
-    await sleep(3000);
+    await sleep(4000 + i * 4000);
   }
   throw new Error('bloqueado (desafio do Cloudflare não passou)');
 }

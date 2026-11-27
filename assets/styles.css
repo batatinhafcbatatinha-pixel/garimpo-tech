@@ -100,6 +100,14 @@ kbd { font: 500 11px/1 var(--f-mono); color: var(--muted); border: 1px solid var
 .live.is-stale i { background: var(--hot); animation: none; }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(200, 255, 46, 0.5); } 70%, 100% { box-shadow: 0 0 0 8px rgba(200, 255, 46, 0); } }
 
+.every {
+  display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 4px 0 10px;
+  border: 1px solid var(--line); border-radius: 11px; background: var(--surface); color: var(--text-2); cursor: pointer;
+}
+.every:hover { border-color: var(--line-2); color: var(--text); }
+.every svg { width: 15px; height: 15px; }
+.every select { border: 0; background: none; outline: none; cursor: pointer; font: 500 12.5px/1 var(--f-body); color: var(--text); padding: 0 6px 0 0; }
+.every select option { background: var(--surface); color: var(--text); }
 .iconbtn {
   display: grid; place-items: center; width: 40px; height: 40px;
   border-radius: 11px; border: 1px solid var(--line); background: var(--surface); cursor: pointer;
@@ -401,6 +409,7 @@ input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border-radius
   .search { order: 3; flex-basis: 100%; max-width: none; }
   .topbar__right { margin-left: auto; }
   .btn--bell span { display: none; }
+  .every select { max-width: 92px; }
   .btn--bell { width: 40px; padding: 0; }
   .search kbd { display: none; }
   .hero { padding-block: 26px 20px; }
