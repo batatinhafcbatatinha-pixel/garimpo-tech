@@ -12,7 +12,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { detectCategory, detectBrand, extractSpecs, isNew, strip } from './classify.mjs';
+import { detectCategory, detectBrand, extractSpecs, isNew, strip, moboSlotsFromSpec } from './classify.mjs';
 
 const MIN_DISCOUNT = +(process.env.MIN_DISCOUNT || 50);
 const KEEP_HOURS = +(process.env.KEEP_HOURS || 72);
@@ -242,6 +242,14 @@ async function promobit() {
     ['/promocoes/notebook-gamer/s/', 4],
     ['/promocoes/placa-mae/s/', 4],
     ['/promocoes/hardware-perifericos/s/', 4],
+    ['/promocoes/cooler/s/', 2],
+    ['/promocoes/gabinete/s/', 2],
+    ['/promocoes/teclado/s/', 2],
+    ['/promocoes/mouse/s/', 2],
+    ['/promocoes/headset/s/', 2],
+    ['/promocoes/fone-de-ouvido/s/', 2],
+    ['/promocoes/playstation-5/s/', 2],
+    ['/promocoes/nintendo-switch/s/', 1],
     ['/promocoes/informatica/', 6],
     ['/promocoes/loja/kabum/', 3],
     ['/promocoes/loja/pichau/', 3],
@@ -315,7 +323,11 @@ async function promobit() {
 
 // ------------------------------------------------------------------ KaBuM (API pública do catálogo)
 async function kabum() {
-  const queries = ['placa de video', 'processador', 'monitor', 'ssd', 'memoria ram', 'notebook', 'placa mae'];
+  const queries = [
+    'placa de video', 'processador', 'monitor', 'ssd', 'memoria ram', 'notebook', 'placa mae',
+    'cooler', 'water cooler', 'gabinete', 'fonte', 'teclado', 'mouse', 'headset', 'fone de ouvido',
+    'playstation 5', 'xbox series', 'nintendo switch',
+  ];
   const out = [];
   let ok = 0;
   const seen = new Set();
@@ -380,11 +392,16 @@ const decodeHtml = (s) =>
 const brl = (s) => +String(s).replace(/[^\d,]/g, '').replace(',', '.');
 
 async function amazon() {
-  const queries = ['placa de video', 'processador', 'monitor gamer', 'ssd nvme', 'memoria ram ddr5', 'memoria ram ddr4', 'notebook', 'placa mae'];
+  const queries = [
+    'placa de video', 'processador', 'monitor gamer', 'ssd nvme', 'memoria ram ddr5', 'memoria ram ddr4', 'notebook', 'placa mae',
+    'water cooler', 'air cooler', 'gabinete gamer', 'fonte atx', 'teclado mecanico', 'mouse gamer', 'headset gamer',
+    ['fone de ouvido bluetooth', 'electronics'], ['console', 'videogames'],
+  ];
   const out = [];
   let ok = 0;
-  for (const q of queries) {
-    const url = `https://www.amazon.com.br/s?k=${encodeURIComponent(q)}&pct-off=50-99&i=computers`;
+  for (const entry of queries) {
+    const [q, dept = 'computers'] = Array.isArray(entry) ? entry : [entry];
+    const url = `https://www.amazon.com.br/s?k=${encodeURIComponent(q)}&pct-off=50-99&i=${dept}`;
     try {
       const html = await get(url);
       if (/captcha|api-services-support/i.test(html.slice(0, 5000))) throw new Error('captcha');
@@ -483,7 +500,7 @@ function addCoupon(c) {
 // ------------------------------------------------------------------ Telegram (canais públicos de promoção)
 // t.me/s/<canal> é a prévia pública do canal: HTML simples, sem login. É de onde vêm os posts do tipo
 // "Processador AMD Ryzen 7 5700X - R$895 - Cupom BAIXOU - meli.la/...".
-const TG_CHANNELS = (process.env.TELEGRAM_CHANNELS || 'pcdofafapromo,ofertasbenevides,ofertasdecomputador,EconoMister,LinksBrazil,gamerdasofertas,linguicapromocoes')
+const TG_CHANNELS = (process.env.TELEGRAM_CHANNELS || 'pcdofafapromo,ofertasbenevides,ofertasdecomputador,EconoMister,LinksBrazil,gamerdasofertas,linguicapromocoes,ofertasportateis')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
@@ -499,12 +516,14 @@ const tgText = (html) =>
 // códigos de cupom são sempre em MAIÚSCULAS nos posts; a palavra "cupom" pode vir de qualquer jeito
 const COUPON_RE = /[Cc][Uu][Pp][Oo][MmNn][Ss]?\s*:?\s*([A-Z0-9][A-Z0-9_-]{3,30})\b(?:\s*\+\s*([A-Z0-9][A-Z0-9_-]{3,30})\b)?/;
 const NOT_CODE = /^(HTTPS?|DESTA|DESSA|DESCONTO|LOJA|APP|NO|NA|PARA|VALIDO|ABAIXO|ACIMA|EXCLUSIVO|AQUI|LINK|OFF)$/;
-const SKIP_LINK = /t\.me\/|telegram|nerdofertas|ofertou\.ai|promoavisa|whatsapp|instagram|bit\.ly\/grupo|linktr\.ee|tr\.ee\/|economisterpromocoes|x\.com\/|twitter\.com/i;
+const SKIP_LINK = /t\.me\/|telegram|nerdofertas|ofertou\.ai|promoavisa|whatsapp|instagram|bit\.ly\/grupo|linktr\.ee|tr\.ee\/|economisterpromocoes|ofertascriticalhits|x\.com\/|twitter\.com/i;
 
 function parseTelegramPost(text, meta) {
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
   if (!lines.length) return;
-  const head = lines[0]
+  // "[Mercado Livre] Produto" (@ofertasportateis): a loja entre colchetes sai do título
+  const unTag = (l) => l.replace(/^[^\p{L}\p{N}[]*\[[^\]]{2,30}\]\s*/u, '');
+  const head = unTag(lines[0])
     .replace(/^[^\p{L}\p{N}]+/u, '')
     .replace(/\s*[-–|]\s*(por\s*)?R\$\s*[\d.,]+.*$/i, '')
     .trim();
@@ -544,7 +563,7 @@ function parseTelegramPost(text, meta) {
   const title =
     lines
       .slice(0, 5)
-      .map((l) => l.replace(/^[^\p{L}\p{N}]+/u, '').replace(/\s*[-–|]\s*(por\s*)?R\$\s*[\d.,]+.*$/i, '').trim())
+      .map((l) => unTag(l).replace(/^[^\p{L}\p{N}]+/u, '').replace(/\s*[-–|]\s*(por\s*)?R\$\s*[\d.,]+.*$/i, '').trim())
       .find((l) => l.length > 12 && detectCategory(l)) || head;
   const cm = COUPON_RE.exec(text);
   const coupon = cm ? [cm[1], cm[2]].filter((c) => c && !NOT_CODE.test(c)).join(' + ') || null : null;
@@ -840,6 +859,68 @@ function dedupe(list) {
   return [...byKey.values()];
 }
 
+// ------------------------------------------------------------------ placa-mãe: slots pela ficha técnica
+// Quantos slots PCIe x16 (dá pra ligar mais de uma placa de vídeo?), de que geração e quantos M.2 quase nunca vêm no título.
+// A ficha técnica do KaBuM traz os dois. Para ofertas de outras lojas, procura o mesmo modelo no catálogo do KaBuM.
+// O resultado fica guardado na oferta (campo "sheet") e é reaproveitado nas rodadas seguintes.
+const KB_API = 'https://servicespub.prod.api.aws.grupokabum.com.br/catalog/v2/products';
+const SLOT_KEYS = ['pcie16', 'm2', 'pcie'];
+// palavras que distinguem um modelo de outro da mesma linha (TUF x Prime, Elite x Eagle...)
+const MOBO_SERIES = new Set(['tuf', 'rog', 'strix', 'prime', 'proart', 'tomahawk', 'mortar', 'pro', 'plus', 'aorus', 'elite', 'eagle', 'ultra', 'master', 'steel', 'legend', 'phantom', 'riptide', 'lightning', 'edge', 'carbon', 'max', 'ds3h', 'ax', 'x', 'v2', 'ii', 'lite', 'challenger', 'ice', 'hero', 'extreme', 'apex', 'crosshair', 'maximus', 'tachyon', 'aero', 'vision', 'taichi', 'nova', 'creator', 'ace', 'godlike', 'unify', 'torpedo', 'bazooka', 'vdh', 'k', 'p', 'a', 'e', 'f', 'm', 'h', 'i', 'g']);
+function moboModel(title) {
+  const t = strip(title).replace(/[,()/]/g, ' ');
+  const words = t.split(' ').filter(Boolean);
+  const chip = words.find((w) => /^[abhxz]\d{3}m?(-|$)/.test(w));
+  const parts = new Set(words.filter((w) => w.length >= 8 && /\d/.test(w) && /[a-z]/.test(w) && w.includes('-')));
+  const series = new Set(words.flatMap((w) => w.split('-')).filter((w) => MOBO_SERIES.has(w)));
+  return { chip, parts, series, brand: detectBrand('mobo', title) };
+}
+function sameMobo(a, b) {
+  const A = moboModel(a), B = moboModel(b);
+  if ([...A.parts].some((p) => B.parts.has(p))) return true; // mesmo código do fabricante
+  if (!A.chip || A.chip !== B.chip || !A.brand || A.brand !== B.brand) return false;
+  return A.series.size === B.series.size && [...A.series].every((w) => B.series.has(w));
+}
+async function kabumSheet(id) {
+  const j = await get(`${KB_API}/${id}`, { json: true, headers: { accept: 'application/json' } });
+  const a = j.attributes || {};
+  const s = moboSlotsFromSpec(a.html || '', a.description || '');
+  if (s.pcieGen) s.pcie = `PCIe ${s.pcieGen}.0`;
+  delete s.pcieGen;
+  return s;
+}
+async function enrichMobos(results, prev) {
+  const prevById = new Map([...(prev.deals || []), ...(prev.radar || [])].map((d) => [d.id, d]));
+  const mobos = Object.values(results).flatMap((r) => r.deals).filter((d) => d.category === 'mobo');
+  let fetched = 0, found = 0;
+  for (const d of mobos) {
+    const p = prevById.get(d.id);
+    if (p?.sheet) {
+      d.sheet = p.sheet;
+      for (const k of SLOT_KEYS) if (p.specs?.[k] != null) d.specs[k] = p.specs[k];
+      continue;
+    }
+    if (fetched >= 40) continue; // limite por rodada; o resto fica para a próxima
+    fetched++;
+    try {
+      let id = d.id.startsWith('kb-') ? d.id.slice(3) : null;
+      if (!id) {
+        const q = strip(d.title).replace(/placa[ -]?mae|motherboard|gamer/g, '').split(/[,(]/)[0].trim().split(' ').slice(0, 6).join(' ');
+        const j = await get(`${KB_API}?query=${encodeURIComponent(q)}&page_size=20&page_number=1`, { json: true, headers: { accept: 'application/json' } });
+        id = (j.data || []).find((it) => it.attributes?.title && sameMobo(d.title, it.attributes.title))?.id || null;
+      }
+      const s = id ? await kabumSheet(id) : {};
+      for (const k of SLOT_KEYS) if (s[k] != null) d.specs[k] = s[k];
+      d.sheet = id ? `kb-${id}` : 'sem ficha';
+      if (s.pcie16 != null || s.m2 != null) found++;
+      await sleep(300);
+    } catch (e) {
+      log('ficha placa-mãe', d.id, e.message);
+    }
+  }
+  if (mobos.length) log(`placas-mãe: ${mobos.length} ofertas, ${fetched} fichas consultadas, ${found} com slots identificados`);
+}
+
 // PARTIAL=1 (versão local): grava o resultado a cada fonte concluída e imprime "@@partial",
 // para a página mostrar as ofertas na hora. Sem PARTIAL (GitHub), grava uma vez só no fim.
 const PARTIAL = !!process.env.PARTIAL;
@@ -851,6 +932,15 @@ function isExpired(d, nowMs) {
   // oferta que dependia de um cupom que esgotou
   if (d.coupon && !d.coupon.includes('+') && EXPIRED_CODES.has(d.coupon.toUpperCase())) return true;
   return false;
+}
+
+// Oferta guardada de rodadas anteriores: se as regras de categoria mudaram (ex.: mouse saiu de
+// "periferico" e virou "mouse"), atualiza categoria, marca e specs pelo título.
+function reclassify(d) {
+  const c = detectCategory(d.title);
+  if (!c || c === d.category) return d;
+  const brand = detectBrand(c, d.title);
+  return brand ? { ...d, category: c, brand, specs: extractSpecs(c, d.title) } : d;
 }
 
 // Junta o que já foi coletado nesta rodada com o anterior e aplica as regras de validade.
@@ -872,7 +962,7 @@ function build(prev, results, now) {
     if (current.has(d.id)) continue;
     if (directOk.has(d.id.slice(0, 3))) continue;
     if (Date.parse(d.lastSeen) < cutoff) continue;
-    current.set(d.id, d);
+    current.set(d.id, reclassify(d));
   }
   const all = [...current.values()].filter((d) => !isExpired(d, nowMs));
   const radarCutoff = nowMs - RADAR_HOURS * 3600e3;
@@ -965,6 +1055,11 @@ async function main() {
     })
   );
 
+  try {
+    await enrichMobos(results, prev);
+  } catch (e) {
+    log('fichas de placa-mãe falharam', e.message);
+  }
   const { payload, prevById, prevCoupons } = build(prev, results, now);
   const { deals, radar, coupons } = payload;
   const newDeals = deals.filter((d) => !prevById.has(d.id));

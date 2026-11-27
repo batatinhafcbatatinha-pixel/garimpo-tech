@@ -6,7 +6,7 @@ Esta é a branch **`site`**, a versão publicada em **https://batatinhafcbatatin
 - **Atualizar:** não há botão nem seletor de intervalo. O F5 sempre traz a última coleta.
 - **Versão local:** quem quiser escolher o intervalo da coleta e ver as ofertas na hora deve usar a branch `main`, rodando no próprio PC. Lá a Pichau e a Terabyte também funcionam por completo.
 
-Ofertas de **informática com 50% de desconto ou mais**, cupons incluídos: CPU, GPU, monitores, notebooks, SSD, RAM, placas-mãe e periféricos. Só aparecem produtos novos de marcas boas. Há três visões:
+Ofertas de **informática com 50% de desconto ou mais**, cupons incluídos: CPU, GPU, monitores, notebooks, SSD, RAM, placas-mãe, fontes, gabinetes, coolers, videogames, controles, teclados, mouses e fones. Só aparecem produtos novos de marcas boas. Placa-mãe mostra quantos slots PCIe x16 tem (dá pra usar mais de uma placa de vídeo?), de que geração (PCIe 3.0/4.0/5.0) e quantos slots M.2 NVMe; processador e placa de vídeo também mostram a geração PCIe. Há três visões:
 
 - **50%+ OFF:** desconto comprovado.
 - **Radar de cupons:** posts de Telegram e Promobit sem preço "de".
