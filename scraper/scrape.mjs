@@ -14,6 +14,7 @@ import { join, resolve, dirname } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { detectCategory, detectBrand, extractSpecs, isNew, strip, moboSlotsFromSpec, modelKey } from './classify.mjs';
 import { verify, recordPrice, prune, loadJson, saveJson, dayOf } from './history.mjs';
+import { loadState, applyState, captureState } from './state.mjs';
 
 const MIN_DISCOUNT = +(process.env.MIN_DISCOUNT || 50);
 const KEEP_HOURS = +(process.env.KEEP_HOURS || 72);
@@ -947,6 +948,8 @@ const HIST_FILE = LOCAL_DIR && join(LOCAL_DIR, 'history.json');
 const EXT_FILE = LOCAL_DIR && join(LOCAL_DIR, 'external-history.json');
 let HIST = null; // carregado no main() quando há DATA_FILE
 let EXT = {};
+const STATE_FILE = LOCAL_DIR && join(LOCAL_DIR, 'state.json');
+const MEM = () => ({ expiredIds: EXPIRED_IDS, expiredCodes: EXPIRED_CODES, refs: REFS });
 function seePrice({ store, title, menu, brandHint, price, coupon = false, category, brand, specs }) {
   if (!HIST || !(price > 0) || !title) return;
   category ||= detectCategory(title, menu);
@@ -1073,9 +1076,13 @@ function save(payload) {
 }
 
 async function main() {
+  let st = null;
   if (HIST_FILE) {
     HIST = await loadJson(HIST_FILE, {});
     EXT = await loadJson(EXT_FILE, {});
+    // esgotados vistos pelo live (ou pela coleta anterior) e referências do KaBuM continuam valendo
+    st = await loadState(STATE_FILE);
+    applyState(st, MEM());
   }
   const hx = () => (HIST ? { hist: HIST, ext: EXT } : {});
   const prev = await loadPrevious();
@@ -1122,6 +1129,7 @@ async function main() {
   const newRadar = radar.filter((d) => !prevById.has(d.id));
   const newCoupons = prev.updatedAt ? coupons.filter((c) => !prevCoupons.has(c.id)) : [];
   await notify(newDeals, prev.updatedAt ? newRadar : [], newCoupons);
+  if (st) await saveJson(STATE_FILE, captureState(await loadState(STATE_FILE), MEM(), now, KEEP_HOURS));
   await save(payload);
   log(
     `total: ${deals.length} ofertas 50%+ (${newDeals.length} novas), ${radar.length} no radar, ${coupons.length} cupons` +
