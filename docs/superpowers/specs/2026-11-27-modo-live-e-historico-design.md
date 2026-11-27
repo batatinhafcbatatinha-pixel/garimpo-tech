@@ -118,7 +118,7 @@ gramjs é a primeira dependência do projeto: entra um `package.json` com ela, e
 - A verificação roda a cada `build()`. Como a janela termina no `firstSeen`, o resultado não piora conforme a oferta envelhece. Só muda quando chega dado novo do período anterior, por exemplo do externo. Fonte: o nosso histórico se cheio; senão, nosso + externo juntos (dias do externo preenchem os que faltam).
 - Menos de 7 dias de dados no total (nosso + externo) → sem referência; a oferta segue a regra de hoje.
 - `descontoReal = 1 − preço / referência`. Se `descontoReal < MIN_DISCOUNT` → a oferta **sai** de `deals` (não vai para o radar). Se passar, o desconto mostrado continua o anunciado.
-- Ofertas que só estão no Radar não passam por essa regra.
+- ~~Ofertas que só estão no Radar não passam por essa regra.~~ Mudança pedida pelo usuário depois da aprovação: itens do Radar (sem preço "de") com referência → desconto real ≥ MIN_DISCOUNT sobem para a 50%+ (preço "de" = mediana); abaixo, saem de tudo; sem referência, continuam no Radar.
 
 ### Na página
 

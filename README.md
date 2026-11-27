@@ -55,6 +55,8 @@ A cada coleta o Garimpo guarda o menor preço do dia de cada modelo, juntando to
 
 Com isso, o desconto anunciado é conferido. A referência é a **mediana dos preços dos 30 dias antes de a oferta aparecer**. Se contra ela o desconto real fica abaixo de 50%, a oferta **some** da lista 50%+. Ela não vai para o radar nem para lugar nenhum. As que passam mostram no card "menor em 30 dias · mediana". O rodapé mostra quantas foram removidas por preço inflado.
 
+O mesmo vale para o **Radar de cupons**, onde ficam os posts sem preço "de". Se o modelo tem histórico, o preço do post é comparado com a mediana. Com 50% ou mais de desconto real, o post sobe para a lista 50%+, com a mediana como preço "de". Abaixo disso, sai de tudo. Sem histórico, continua no radar.
+
 Enquanto o nosso histórico de um modelo é curto, entra também o histórico do **Zoom** (o Buscapé fica de reserva; os dois têm os mesmos dados). A consulta vale só para ofertas que passaram dos 50% pelo preço anunciado, com no máximo 40 modelos por coleta, uma consulta por vez e cache de 24 h. Quando o modelo tem preço em 20 dos últimos 30 dias no nosso histórico, o Zoom deixa de ser consultado para ele. Com menos de 7 dias de dados, a oferta segue a regra antiga (preço "de" da loja).
 
 O modelo é reconhecido pelo código no título (ex.: `5700X`, `SN770`, `G502`). Produto sem código de modelo identificável não passa por essa conferência.

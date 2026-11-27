@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { detectCategory, detectBrand, extractSpecs, isNew, strip, moboSlotsFromSpec, modelKey } from './classify.mjs';
-import { verify, recordPrice, prune, loadJson, saveJson, dayOf } from './history.mjs';
+import { verify, checkRadar, recordPrice, prune, loadJson, saveJson, dayOf } from './history.mjs';
 import { loadState, applyState, captureState } from './state.mjs';
 import { enrichExternal } from './external.mjs';
 
@@ -1018,10 +1018,16 @@ function build(prev, results, now, { hist, ext } = {}) {
     deals = v.kept;
     removedInflated = v.removed;
   }
+  let radar = dedupe(all.filter((d) => d.radar && Date.parse(d.postedAt || d.firstSeen) >= radarCutoff));
+  if (hist) {
+    // radar com histórico: desconto real conhecido → sobe para a 50%+ ou sai de tudo
+    const r = checkRadar(radar, hist, ext || {}, MIN_DISCOUNT);
+    radar = r.kept;
+    deals = deals.concat(r.promoted);
+    removedInflated += r.removed;
+  }
   deals.sort((a, b) => b.discount - a.discount);
-  const radar = dedupe(all.filter((d) => d.radar && Date.parse(d.postedAt || d.firstSeen) >= radarCutoff)).sort((a, b) =>
-    (b.postedAt || b.firstSeen).localeCompare(a.postedAt || a.firstSeen)
-  );
+  radar.sort((a, b) => (b.postedAt || b.firstSeen).localeCompare(a.postedAt || a.firstSeen));
 
   // cupons: os desta rodada + os anteriores ainda válidos
   const couponCut = nowMs - COUPON_HOURS * 3600e3;

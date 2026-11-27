@@ -125,3 +125,33 @@ export function verify(deals, hist, ext, minDiscount) {
   }
   return { kept, removed };
 }
+
+// Itens do radar (sem preço "de" que prove os 50%): com histórico, o desconto real é conhecido.
+// 50%+ real → sobem para a lista 50%+ (o "de" passa a ser a mediana); abaixo disso → saem de tudo.
+// Sem histórico suficiente → continuam no radar.
+export function checkRadar(radar, hist, ext, minDiscount) {
+  const promoted = [], kept = [];
+  let removed = 0;
+  for (const d of radar) {
+    const key = modelKey(d);
+    const ref = key && reference(hist, ext, key, d.firstSeen || d.postedAt || new Date().toISOString());
+    if (!ref) {
+      kept.push(d);
+      continue;
+    }
+    const real = Math.round((1 - d.price / ref.median) * 100);
+    if (real < minDiscount) {
+      removed++;
+      continue;
+    }
+    const { radar: _, ...rest } = d;
+    promoted.push({
+      ...rest,
+      oldPrice: Math.round(ref.median * 100) / 100,
+      discount: real,
+      ref: 'Mediana do histórico de preços (30 dias antes da oferta)',
+      hist: { min30: ref.min, median30: ref.median, source: ref.source, days: ref.days },
+    });
+  }
+  return { promoted, kept, removed };
+}

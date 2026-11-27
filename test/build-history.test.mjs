@@ -30,3 +30,31 @@ test('build sem histórico mantém o comportamento de hoje', () => {
   assert.equal(payload.deals.length, 2);
   assert.equal(payload.removedInflated, undefined);
 });
+
+const radarItem = (id, price, title = 'Processador AMD Ryzen 7 5700X AM4', specs = { modelo: '5700X' }) => ({
+  id, store: 'mercadolivre', title, brand: 'AMD', category: 'cpu', specs, price, oldPrice: null, discount: null,
+  coupon: 'MELI10', radar: true, url: 'x', source: 'Telegram', postedAt: NOW,
+});
+
+test('item do radar com histórico: 50%+ real vai para a lista 50%+', () => {
+  const { payload } = build({ deals: [] }, { telegram: { ok: true, deals: [radarItem('tg-a-1', 400)] } }, NOW, { hist: hist(), ext: {} });
+  const d = payload.deals.find((x) => x.id === 'tg-a-1');
+  assert.ok(d, 'devia estar na 50%+');
+  assert.equal(d.discount, 60);
+  assert.equal(d.oldPrice, 1000);
+  assert.equal(d.radar, undefined);
+  assert.equal(d.hist.median30, 1000);
+  assert.equal(payload.radar.find((x) => x.id === 'tg-a-1'), undefined);
+});
+
+test('item do radar com histórico abaixo de 50% some de tudo', () => {
+  const { payload } = build({ deals: [] }, { telegram: { ok: true, deals: [radarItem('tg-a-2', 700)] } }, NOW, { hist: hist(), ext: {} });
+  assert.equal([...payload.deals, ...payload.radar].find((x) => x.id === 'tg-a-2'), undefined);
+  assert.equal(payload.removedInflated, 1);
+});
+
+test('item do radar sem histórico continua no radar', () => {
+  const r = radarItem('tg-a-3', 700, 'Processador AMD Ryzen 5 5600 AM4', { modelo: '5600' });
+  const { payload } = build({ deals: [] }, { telegram: { ok: true, deals: [r] } }, NOW, { hist: hist(), ext: {} });
+  assert.ok(payload.radar.find((x) => x.id === 'tg-a-3'));
+});
