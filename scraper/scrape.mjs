@@ -15,6 +15,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { detectCategory, detectBrand, extractSpecs, isNew, strip, moboSlotsFromSpec, modelKey } from './classify.mjs';
 import { verify, recordPrice, prune, loadJson, saveJson, dayOf } from './history.mjs';
 import { loadState, applyState, captureState } from './state.mjs';
+import { enrichExternal } from './external.mjs';
 
 const MIN_DISCOUNT = +(process.env.MIN_DISCOUNT || 50);
 const KEEP_HOURS = +(process.env.KEEP_HOURS || 72);
@@ -1121,6 +1122,16 @@ async function main() {
     await enrichMobos(results, prev);
   } catch (e) {
     log('fichas de placa-mãe falharam', e.message);
+  }
+  if (HIST) {
+    // Zoom/Buscapé: só para o que passou dos 50% pelo preço anunciado e cujo histórico nosso ainda não encheu
+    try {
+      const stated = build(prev, results, now).payload.deals.sort((a, b) => b.discount - a.discount);
+      await enrichExternal(stated, { hist: HIST, ext: EXT, fetchHtml: (u) => get(u, { tries: 1 }), now, log });
+      await saveJson(EXT_FILE, EXT);
+    } catch (e) {
+      log('externo falhou', e.message);
+    }
   }
   await saveHistory(results);
   const { payload, prevById, prevCoupons } = build(prev, results, now, hx());
