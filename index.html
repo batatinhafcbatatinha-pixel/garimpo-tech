@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Garimpo — hardware com 50% OFF ou mais</title>
+  <meta name="description" content="Ofertas de informática com no mínimo 50% de desconto, incluindo cupons, nas principais lojas do Brasil. Só produtos novos e marcas boas." />
+  <meta name="theme-color" content="#0b0c0f" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar__in">
+      <a class="logo" href="./" aria-label="Garimpo — início">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2 29 9.5v13L16 30 3 22.5v-13z" fill="var(--accent)"/><path d="M16 9l7 4v6l-7 4-7-4v-6z" fill="var(--bg)"/><path d="M16 13l3 1.8v2.4L16 19l-3-1.8v-2.4z" fill="var(--accent)"/></svg>
+        <span>garimpo</span>
+      </a>
+      <label class="search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" type="search" placeholder="Buscar: RTX 5070, 9800X3D, OLED 240Hz…" autocomplete="off" />
+        <kbd>/</kbd>
+      </label>
+      <div class="topbar__right">
+        <span class="live" id="updated" title="Última atualização dos dados"><i></i><span>carregando…</span></span>
+        <button class="iconbtn" id="themeBtn" aria-label="Alternar tema" title="Tema">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        </button>
+        <button class="btn btn--bell" id="notifBtn">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>
+          <span>Alertas</span><b class="dot" id="notifDot" hidden></b>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero wrap">
+    <div class="hero__copy">
+      <p class="eyebrow">Hardware · só produtos novos · só marcas que prestam</p>
+      <h1>Metade do preço<br /><em>ou nem aparece aqui.</em></h1>
+    </div>
+    <dl class="stats" id="stats">
+      <div><dt>ofertas agora</dt><dd id="stCount">—</dd></div>
+      <div><dt>maior desconto</dt><dd id="stBest">—</dd></div>
+      <div><dt>com cupom</dt><dd id="stCoupons">—</dd></div>
+      <div><dt>lojas ativas</dt><dd id="stStores">—</dd></div>
+    </dl>
+  </section>
+
+  <nav class="cats wrap" id="cats" aria-label="Categorias"></nav>
+
+  <main class="layout wrap">
+    <aside class="filters" id="filters" aria-label="Filtros">
+      <div class="filters__head">
+        <h2>Filtros</h2>
+        <button class="link" id="clearBtn">Limpar</button>
+        <button class="iconbtn filters__close" id="closeFilters" aria-label="Fechar filtros">✕</button>
+      </div>
+
+      <section class="fgroup">
+        <h3>Desconto mínimo <output id="discOut">50%</output></h3>
+        <input type="range" id="disc" min="50" max="90" step="5" value="50" />
+        <div class="ticks"><span>50</span><span>60</span><span>70</span><span>80</span><span>90</span></div>
+      </section>
+
+      <section class="fgroup">
+        <h3>Faixa de preço</h3>
+        <div class="price">
+          <label><span>R$</span><input id="pmin" inputmode="numeric" placeholder="mín" /></label>
+          <i></i>
+          <label><span>R$</span><input id="pmax" inputmode="numeric" placeholder="máx" /></label>
+        </div>
+        <div class="chips chips--sm" id="pricePresets"></div>
+      </section>
+
+      <section class="fgroup">
+        <label class="switch"><input type="checkbox" id="onlyCoupon" /><span></span> Só com cupom</label>
+      </section>
+
+      <div id="specFacets"></div>
+
+      <section class="fgroup">
+        <h3>Lojas</h3>
+        <div class="chips" id="storeChips"></div>
+      </section>
+      <section class="fgroup">
+        <h3>Marcas</h3>
+        <div class="chips" id="brandChips"></div>
+      </section>
+      <p class="fnote">Marcas genéricas e de baixa qualidade (Duex, Positivo, Multilaser, Afox…) são descartadas na coleta. Usados, recondicionados e open box também.</p>
+    </aside>
+
+    <section class="results">
+      <div class="toolbar">
+        <button class="btn btn--ghost filters__open" id="openFilters">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Filtros <b id="activeCount"></b>
+        </button>
+        <p class="toolbar__count" id="count"></p>
+        <div class="active" id="activeTags"></div>
+        <label class="sort">
+          <span>Ordenar</span>
+          <select id="sort">
+            <option value="disc">Maior desconto</option>
+            <option value="save">Maior economia (R$)</option>
+            <option value="new">Mais recentes</option>
+            <option value="low">Menor preço</option>
+            <option value="high">Maior preço</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid" id="grid" aria-live="polite"></div>
+      <div class="empty" id="empty" hidden>
+        <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M32 6 55 19v26L32 58 9 45V19z"/><path d="M24 30h16M24 37h10"/></svg>
+        <h3>Nada garimpado com esses filtros</h3>
+        <p>Ofertas de 50%+ em marca boa são raras — afrouxe um filtro ou ative os alertas pra ser avisado quando aparecer.</p>
+        <button class="btn" id="emptyClear">Limpar filtros</button>
+      </div>
+      <footer class="foot">
+        <p>Dados coletados automaticamente a cada ~30 min de KaBuM, Amazon, Pato Loco e do agregador Promobit (cupons de Amazon, Magalu, Mercado Livre, Shopee, KaBuM, Pichau e Terabyte). O desconto é calculado sobre o preço “de” anunciado pela loja — confira sempre na página antes de comprar.</p>
+        <p id="sourceStatus"></p>
+      </footer>
+    </section>
+  </main>
+
+  <!-- Painel de alertas -->
+  <dialog class="sheet" id="notifSheet" aria-labelledby="nTitle">
+    <form method="dialog" class="sheet__in" id="notifForm">
+      <header>
+        <div>
+          <p class="eyebrow">Alertas</p>
+          <h2 id="nTitle">Me avisa quando aparecer</h2>
+        </div>
+        <button class="iconbtn" value="close" aria-label="Fechar">✕</button>
+      </header>
+
+      <label class="switch switch--lg"><input type="checkbox" id="nOn" /><span></span> Notificações no navegador</label>
+      <p class="hint" id="nPerm"></p>
+
+      <section class="fgroup">
+        <h3>Faixa de desconto <output id="nRangeOut">60% – 100%</output></h3>
+        <div class="dual">
+          <input type="range" id="nMin" min="50" max="100" step="5" value="60" />
+          <input type="range" id="nMax" min="50" max="100" step="5" value="100" />
+        </div>
+      </section>
+
+      <section class="fgroup">
+        <h3>Categorias</h3>
+        <div class="chips" id="nCats"></div>
+      </section>
+
+      <section class="fgroup">
+        <h3>Preço máximo <span class="muted">(opcional)</span></h3>
+        <div class="price"><label><span>R$</span><input id="nMaxPrice" inputmode="numeric" placeholder="sem limite" /></label></div>
+      </section>
+
+      <section class="fgroup">
+        <h3>Checar a cada</h3>
+        <div class="seg" id="nInterval">
+          <label><input type="radio" name="nint" value="5" /><span>5 min</span></label>
+          <label><input type="radio" name="nint" value="15" checked /><span>15 min</span></label>
+          <label><input type="radio" name="nint" value="30" /><span>30 min</span></label>
+        </div>
+        <p class="hint">Funciona com o site aberto (pode ficar em segundo plano). Dica: instale como app pelo menu do Chrome.</p>
+      </section>
+
+      <section class="phone" id="phoneBox" hidden>
+        <h3>📱 No celular, com o site fechado</h3>
+        <p>Instale o app gratuito <b>ntfy</b> (Android/iOS) e assine o tópico da categoria que quiser. Chegam as ofertas com <b id="ntfyMin">60</b>%+ de desconto.</p>
+        <div class="topics" id="topics"></div>
+      </section>
+
+      <footer>
+        <button type="button" class="btn btn--ghost" id="nTest">Enviar teste</button>
+        <button class="btn" value="save" id="nSave">Salvar alertas</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+  <div class="scrim" id="scrim" hidden></div>
+
+  <template id="cardTpl">
+    <article class="card">
+      <a class="card__img" target="_blank" rel="noopener sponsored">
+        <img loading="lazy" decoding="async" alt="" />
+        <span class="badge"></span>
+        <span class="fresh" hidden>novo</span>
+      </a>
+      <div class="card__body">
+        <div class="card__meta"><span class="store"></span><span class="brand"></span><time></time></div>
+        <h3 class="card__title"><a target="_blank" rel="noopener sponsored"></a></h3>
+        <ul class="specs"></ul>
+        <div class="card__price">
+          <s class="old"></s>
+          <strong class="now"></strong>
+          <span class="save"></span>
+        </div>
+        <div class="card__actions">
+          <button class="coupon" type="button" hidden><span>CUPOM</span><b></b><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg></button>
+          <a class="go" target="_blank" rel="noopener sponsored">Ver oferta <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg></a>
+        </div>
+        <p class="ref" hidden></p>
+      </div>
+    </article>
+  </template>
+
+  <script src="assets/app.js" type="module"></script>
+</body>
+</html>

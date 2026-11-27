@@ -1,0 +1,54 @@
+name: Coletar ofertas e publicar
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Coletar ofertas
+        env:
+          # histórico: o JSON publicado na rodada anterior (mantém "visto pela 1ª vez", ofertas de 72h etc.)
+          PREV_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data/deals.json
+          SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+          MIN_DISCOUNT: ${{ vars.MIN_DISCOUNT || '50' }}
+          NTFY_TOPIC: ${{ vars.NTFY_TOPIC }}
+          NTFY_MIN_DISCOUNT: ${{ vars.NTFY_MIN_DISCOUNT || '60' }}
+        run: node scraper/scrape.mjs
+      - name: Montar site
+        run: |
+          mkdir -p _site
+          cp -r index.html sw.js manifest.webmanifest assets data _site/
+          touch _site/.nojekyll
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
