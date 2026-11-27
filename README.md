@@ -2,7 +2,9 @@
 
 Ofertas de **informática com 50% de desconto ou mais**, cupons incluídos, nas principais lojas do Brasil. Só aparecem **produtos novos** de **marcas boas**.
 
-**CPU · GPU · Monitores · Notebooks · SSD · RAM · Placas-mãe · Periféricos**
+**CPU · GPU · Monitores · Notebooks · SSD · RAM · Placas-mãe · Fontes · Gabinetes · Coolers · Videogames · Controles · Teclados · Mouses · Fones**
+
+Placa-mãe mostra quantos slots PCIe x16 tem (dá pra usar mais de uma placa de vídeo?), de que geração (PCIe 3.0/4.0/5.0) e quantos slots M.2 NVMe — lidos da ficha técnica do KaBuM, inclusive para ofertas de outras lojas. Processador e placa de vídeo também mostram a geração PCIe (e as linhas, quando a placa não é x16).
 
 ## Branches
 
@@ -51,7 +53,7 @@ scraper/scrape.mjs → data/deals.json
   └─ Telegram       prévia pública dos canais (t.me/s/<canal>): Mercado Livre, Shopee, AliExpress…
 ```
 
-Canais padrão: `pcdofafapromo`, `ofertasbenevides`, `ofertasdecomputador`, `EconoMister`, `LinksBrazil`, `gamerdasofertas`, `linguicapromocoes`. Para trocar, use `TELEGRAM_CHANNELS=canal1,canal2` (variável de ambiente ou variável do repositório).
+Canais padrão: `pcdofafapromo`, `ofertasbenevides`, `ofertasdecomputador`, `EconoMister`, `LinksBrazil`, `gamerdasofertas`, `linguicapromocoes`, `ofertasportateis`. Para trocar, use `TELEGRAM_CHANNELS=canal1,canal2` (variável de ambiente ou variável do repositório).
 
 Filtros aplicados em todas as fontes: só produtos novos (descarta usado, recondicionado e open box), só informática e só marcas da lista boa de cada categoria. Duex, Positivo, Multilaser, Vaio/Compaq BR, Afox, Goline, BRX, Redragon e similares são bloqueadas (`scraper/classify.mjs`).
 

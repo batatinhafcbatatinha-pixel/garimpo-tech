@@ -35,6 +35,13 @@ const ICON = {
   ram: '<path d="M3 7h18v8H3z"/><path d="M6 15v3M10 15v3M14 15v3M18 15v3M7 10h2M11 10h2M15 10h2"/>',
   mobo: '<rect x="3" y="3" width="18" height="18" rx="2"/><rect x="7" y="7" width="6" height="6" rx="1"/><path d="M16 7v4M16 14h2M7 17h10"/>',
   periferico: '<path d="M7 7h10a5 5 0 0 1 5 5v1a4 4 0 0 1-7 2.6L14 14h-4l-1 1.6A4 4 0 0 1 2 13v-1a5 5 0 0 1 5-5z"/><path d="M7 10v3M5.5 11.5h3M16 11h.01M18 13h.01"/>',
+  console: '<rect x="3" y="4" width="8" height="16" rx="2"/><path d="M14 4h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5z"/><path d="M7 8v3M5.5 9.5h3M17.5 14h.01"/>',
+  teclado: '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"/>',
+  mouse: '<rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 7v4"/>',
+  fone: '<path d="M3 14v-2a9 9 0 0 1 18 0v2"/><rect x="2" y="14" width="5" height="7" rx="1.5"/><rect x="17" y="14" width="5" height="7" rx="1.5"/>',
+  cooler: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="1.5"/><path d="M12 10.5C12 7 13.5 5 16 5M13.5 12c3.5 0 5.5 1.5 5.5 4M12 13.5c0 3.5-1.5 5.5-4 5.5M10.5 12C7 12 5 10.5 5 8"/>',
+  gabinete: '<rect x="6" y="2" width="12" height="20" rx="2"/><circle cx="12" cy="14" r="3"/><path d="M9 6h6"/>',
+  fonte: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="8" cy="12" r="3"/><path d="M13 13l2-4v3h2l-2 4v-3z"/>',
 };
 
 const CATS = [
@@ -46,7 +53,14 @@ const CATS = [
   { id: 'ssd', label: 'SSD', short: 'SSD' },
   { id: 'ram', label: 'Memória RAM', short: 'RAM' },
   { id: 'mobo', label: 'Placas-mãe', short: 'Placa-mãe' },
-  { id: 'periferico', label: 'Periféricos', short: 'Periféricos' },
+  { id: 'fonte', label: 'Fontes', short: 'Fonte' },
+  { id: 'gabinete', label: 'Gabinetes', short: 'Gabinete' },
+  { id: 'cooler', label: 'Coolers', short: 'Cooler' },
+  { id: 'console', label: 'Videogames', short: 'Videogame' },
+  { id: 'periferico', label: 'Controles', short: 'Controle' },
+  { id: 'teclado', label: 'Teclados', short: 'Teclado' },
+  { id: 'mouse', label: 'Mouses', short: 'Mouse' },
+  { id: 'fone', label: 'Fones e headsets', short: 'Fone' },
 ];
 const catLabel = (id) => CATS.find((c) => c.id === id)?.label || id;
 
@@ -54,6 +68,8 @@ const gb = (v) => (v >= 1000 ? `${+(v / 1024).toFixed(1)} TB` : `${v} GB`);
 const inchBucket = (v) => (v <= 24 ? 'até 24"' : v <= 27 ? '25–27"' : v <= 32 ? '28–32"' : '34" ou mais');
 const hzBucket = (v) => (v < 100 ? '60–75 Hz' : v < 144 ? '100–120 Hz' : v < 200 ? '144–180 Hz' : v < 300 ? '200–280 Hz' : '300 Hz+');
 const order = (list) => (a, b) => list.indexOf(a) - list.indexOf(b);
+// m2: número de slots (ficha técnica) ou 'Sim' (o título só diz que tem M.2/NVMe)
+const m2Bucket = (v) => (v === 'Sim' ? 'Tem M.2' : v >= 3 ? '3 ou mais' : v == 2 ? '2 slots' : v == 1 ? '1 slot' : null);
 
 // Filtros específicos de cada categoria: [chave, rótulo, formatação/bucket, ordenação]
 const FACETS = {
@@ -63,12 +79,14 @@ const FACETS = {
     ['chip', 'Modelo'],
     ['vram', 'Memória (VRAM)', gb, 'num'],
     ['memoria', 'Tipo de memória'],
+    ['pcie', 'Interface PCIe'],
   ],
   cpu: [
     ['fabricante', 'Fabricante'],
     ['linha', 'Linha'],
     ['socket', 'Soquete'],
     ['x3d', '3D V-Cache', (v) => (v === 'Sim' ? 'Só X3D' : v)],
+    ['pcie', 'PCIe'],
   ],
   monitor: [
     ['polegadas', 'Tamanho', inchBucket, order(['até 24"', '25–27"', '28–32"', '34" ou mais'])],
@@ -103,13 +121,55 @@ const FACETS = {
     ['chipset', 'Chipset'],
     ['ddr', 'Memória'],
     ['formato', 'Formato'],
+    ['pcie', 'PCIe (slot da placa de vídeo)'],
+    ['pcie16', 'Slots PCIe x16', (v) => (v >= 2 ? '2 ou mais (multi-GPU)' : '1 slot'), 'num'],
+    ['m2', 'Slots M.2 (NVMe)', m2Bucket, order(['Tem M.2', '1 slot', '2 slots', '3 ou mais'])],
     ['wifi', 'Wi-Fi'],
   ],
   periferico: [
+    ['conexao', 'Conexão'],
+    ['plataforma', 'Plataforma'],
+  ],
+  console: [
+    ['plataforma', 'Plataforma'],
+    ['modelo', 'Modelo'],
+    ['midia', 'Mídia'],
+    ['armazenamento', 'Armazenamento', gb, 'num'],
+  ],
+  teclado: [
+    ['conexao', 'Conexão'],
+    ['switch', 'Tipo de tecla'],
+    ['formato', 'Tamanho', null, order(['Full size', 'TKL', '75%', '65%', '60%'])],
+    ['layout', 'Layout'],
+  ],
+  mouse: [
+    ['conexao', 'Conexão'],
+    ['dpi', 'DPI máximo', (v) => (v < 10000 ? 'até 10 mil' : v < 26000 ? '10–25 mil' : '26 mil ou mais'), order(['até 10 mil', '10–25 mil', '26 mil ou mais'])],
+    ['peso', 'Peso', (v) => (v < 70 ? 'até 69 g (ultraleve)' : v < 100 ? '70–99 g' : '100 g ou mais'), order(['até 69 g (ultraleve)', '70–99 g', '100 g ou mais'])],
+  ],
+  fone: [
     ['tipo', 'Tipo'],
     ['conexao', 'Conexão'],
-    ['plataforma', 'Plataforma (controles)'],
-    ['switch', 'Teclado'],
+    ['anc', 'Cancelamento de ruído'],
+    ['surround', 'Som'],
+  ],
+  cooler: [
+    ['tipo', 'Tipo'],
+    ['radiador', 'Radiador', (v) => `${v} mm`, 'num'],
+    ['rgb', 'Iluminação'],
+    ['lcd', 'Tela'],
+  ],
+  gabinete: [
+    ['formato', 'Formato', null, order(['Full Tower', 'Mid Tower', 'Micro-ATX', 'Mini / ITX'])],
+    ['vidro', 'Lateral'],
+    ['aquario', 'Estilo'],
+    ['fans', 'Ventoinhas inclusas', (v) => (v === 0 ? 'Sem ventoinhas' : v >= 4 ? '4 ou mais' : `${v}`), order(['Sem ventoinhas', '1', '2', '3', '4 ou mais'])],
+  ],
+  fonte: [
+    ['potencia', 'Potência', (v) => (v < 600 ? 'até 599 W' : v < 750 ? '600–749 W' : v < 900 ? '750–899 W' : v < 1100 ? '900–1099 W' : '1100 W ou mais'), order(['até 599 W', '600–749 W', '750–899 W', '900–1099 W', '1100 W ou mais'])],
+    ['certificacao', 'Certificação', null, order(['80 Plus', '80 Plus White', '80 Plus Bronze', '80 Plus Silver', '80 Plus Gold', '80 Plus Platinum', '80 Plus Titanium'])],
+    ['modular', 'Cabos'],
+    ['atx3', 'Padrão'],
   ],
 };
 
@@ -125,14 +185,30 @@ function specLine(d) {
   const out = [];
   const push = (v) => v && out.push(v);
   switch (d.category) {
-    case 'gpu': push(s.chip); push(s.vram && `${s.vram} GB`); push(s.memoria); break;
-    case 'cpu': push(s.linha); push(s.modelo); push(s.socket); break;
+    case 'gpu': push(s.chip); push(s.vram && `${s.vram} GB`); push(s.memoria); push(s.pcie); break;
+    case 'cpu': push(s.linha); push(s.modelo); push(s.socket); push(s.pcie); break;
     case 'monitor': push(s.polegadas && `${s.polegadas}"`); push(s.resolucao); push(s.hz && `${s.hz} Hz`); push(s.painel); break;
     case 'notebook': push(s.processador); push(s.ram && `${s.ram} GB RAM`); push(s.armazenamento && gb(s.armazenamento)); push(s.gpu); push(s.hz && `${s.hz} Hz`); break;
     case 'ssd': push(s.capacidade && gb(s.capacidade)); push(s.interface); push(s.geracao); break;
     case 'ram': push(s.capacidade && `${s.capacidade} GB`); push(s.tipo); push(s.frequencia && `${s.frequencia} MHz`); push(s.uso === 'Notebook' ? 'SODIMM' : null); break;
-    case 'mobo': push(s.chipset); push(s.ddr); push(s.formato); push(s.wifi); break;
-    case 'periferico': push(s.tipo); push(s.conexao); push(s.plataforma); push(s.switch); break;
+    case 'mobo':
+      push(s.chipset); push(s.ddr); push(s.formato);
+      {
+        // "2× PCIe 4.0 x16 · multi-GPU" / "1× PCIe 5.0 x16" / só "PCIe 4.0" quando não se sabe quantos slots
+        const gen = s.pcie || 'PCIe';
+        push(s.pcie16 >= 2 ? `${s.pcie16}× ${gen} x16 · multi-GPU` : s.pcie16 === 1 ? `1× ${gen} x16` : s.pcie);
+      }
+      push(s.m2 === 'Sim' ? 'M.2 NVMe' : s.m2 > 0 ? `${s.m2}× M.2 NVMe` : null);
+      push(s.wifi);
+      return out;
+    case 'periferico': push(s.tipo); push(s.conexao); push(s.plataforma); break;
+    case 'console': push(s.modelo); push(s.midia); push(s.armazenamento && gb(s.armazenamento)); break;
+    case 'teclado': push(s.switch); push(s.formato); push(s.conexao); push(s.layout); break;
+    case 'mouse': push(s.conexao); push(s.dpi && `${s.dpi.toLocaleString('pt-BR')} DPI`); push(s.peso && `${s.peso} g`); break;
+    case 'fone': push(s.tipo); push(s.conexao); push(s.anc && 'ANC'); push(s.surround); break;
+    case 'cooler': push(s.tipo); push(s.radiador && `${s.radiador} mm`); push(s.rgb); push(s.lcd); break;
+    case 'gabinete': push(s.formato); push(s.vidro); push(s.aquario); push(s.fans != null && (s.fans ? `${s.fans} fans` : 'Sem fans')); break;
+    case 'fonte': push(s.potencia && `${s.potencia} W`); push(s.certificacao); push(s.modular); push(s.atx3); break;
   }
   return out.slice(0, 5);
 }
