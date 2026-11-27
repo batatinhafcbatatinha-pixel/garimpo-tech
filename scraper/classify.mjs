@@ -582,3 +582,37 @@ function gpuPcie(chip) {
   return { gen, lanes };
 }
 export { fmtStorage };
+
+// ---------- Chave de modelo (histórico de preços) ----------
+// "categoria|marca|modelo", igual para o mesmo produto em lojas diferentes. null quando o título não
+// traz um código de modelo confiável (aí o item fica fora do histórico).
+const GPU_SKIP = new Set(['placa', 'de', 'video', 'geforce', 'radeon', 'nvidia', 'amd', 'intel', 'gamer', 'gaming']);
+const NOT_MODEL =
+  /^(\d+(gb|tb|mb|mhz|ghz|hz|mm|cm|w|v|pol|ms|k|p|rpm|mah|db|g)|\d+x\d+(gb)?|ddr\d\w*|gddr\d\w*|pcie\d|gen\d|usb\d\w*|m2|wifi\d\w*|bt\d|rgb\d*|lga\d+|am\d|x\d+|\d+a|\d+dpi|abnt\d?|rj\d+|ipx?\d+|hdmi\d\w*|dp\d\w*|rz\d\d)$/;
+export function modelKey(d) {
+  const brand = strip(d.brand).replace(/[^a-z0-9]+/g, '');
+  if (!d.category || !brand) return null;
+  const s = d.specs || {};
+  const t = strip(d.title);
+  if (d.category === 'cpu') return s.modelo ? `cpu|${brand}|${s.modelo.toLowerCase()}` : null;
+  if (d.category === 'gpu') {
+    if (!s.chip || !s.vram) return null;
+    // linha da placa: palavra logo depois da marca (Dual, Ventus, Windforce…), se houver
+    const words = t.replace(/[^a-z0-9 ]+/g, ' ').split(' ').filter(Boolean);
+    const bi = words.findIndex((w) => w.replace(/[^a-z0-9]/g, '') === brand || w.startsWith(brand));
+    let line = null;
+    for (let i = bi + 1; bi >= 0 && i < words.length; i++) {
+      if (GPU_SKIP.has(words[i])) continue;
+      if (/^(rtx|gtx|rx|arc)$/.test(words[i]) || /\d/.test(words[i])) break;
+      line = words[i];
+      break;
+    }
+    return ['gpu', brand, line, s.chip.toLowerCase(), `${s.vram}gb`].filter(Boolean).join('|');
+  }
+  // hífen junta o código (A620M-B → a620mb, RZ03-04700100 → rz0304700100)
+  const tokens = t.split(/[^a-z0-9-]+/).map((w) => w.replace(/-/g, '')).filter(Boolean);
+  const code = tokens.find((w) => w.length >= 4 && /[a-z]/.test(w) && /\d/.test(w) && w !== brand && !NOT_MODEL.test(w));
+  if (!code) return null;
+  const cap = (d.category === 'ssd' || d.category === 'ram') && s.capacidade ? `|${s.capacidade}` : '';
+  return `${d.category}|${brand}|${code}${cap}`;
+}
