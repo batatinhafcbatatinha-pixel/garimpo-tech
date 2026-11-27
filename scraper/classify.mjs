@@ -72,6 +72,18 @@ const BRAND = {
   teamgroup: B('TeamGroup', /\b(team ?group|t-?force|t-?create)\b/),
   gskill: B('G.Skill', /\bg\.? ?skill\b/),
   patriot: B('Patriot', /\b(patriot|viper)\b/),
+  logitech: B('Logitech', /\b(logitech|logi g)\b/),
+  hyperx: B('HyperX', /\bhyperx\b/),
+  steelseries: B('SteelSeries', /\bsteel ?series\b/),
+  gamesir: B('GameSir', /\bgamesir\b/),
+  '8bitdo': B('8BitDo', /\b8 ?bitdo\b/),
+  xbox: B('Microsoft / Xbox', /\b(microsoft|xbox wireless|controle xbox|controle sem fio xbox)\b/),
+  sony: B('Sony / PlayStation', /\b(sony|dualsense|dualshock)\b/),
+  keychron: B('Keychron', /\bkeychron\b/),
+  akko: B('Akko', /\bakko\b/),
+  glorious: B('Glorious', /\bglorious\b/),
+  flydigi: B('Flydigi', /\bflydigi\b/),
+  rog: B('ASUS', /\b(asus|rog)\b/),
 };
 
 const CAT_BRANDS = {
@@ -82,6 +94,7 @@ const CAT_BRANDS = {
   ssd: ['samsung', 'kingston', 'wd', 'crucial', 'seagate', 'xpg', 'corsair', 'lexar', 'solidigm', 'teamgroup', 'msi', 'gigabyte', 'patriot'],
   ram: ['kingston', 'corsair', 'gskill', 'crucial', 'xpg', 'teamgroup', 'patriot', 'samsung', 'lexar'],
   notebook: ['acer', 'asus', 'lenovo', 'dell', 'alienware', 'hp', 'samsung', 'apple', 'msi', 'gigabyte', 'razer', 'lg'],
+  periferico: ['logitech', 'razer', 'hyperx', 'corsair', 'steelseries', 'gamesir', '8bitdo', 'xbox', 'sony', 'keychron', 'akko', 'glorious', 'flydigi', 'rog', 'kingston'],
 };
 
 const blockedRe = new RegExp(`\\b(${BLOCKED.map((b) => b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`);
@@ -116,6 +129,8 @@ export function detectCategory(title, menuHint = '') {
   const accessory = /^(capa|case|mochila|maleta|bolsa|suporte|carregador|fonte|bateria|cooler|base|memoria|ssd|tela|teclado|pelicula|adaptador|cabo|hub|dock|skin|protetor|mouse|kit)\b/;
   const isNotebook = /\b(notebook|laptop|macbook|chromebook|ultrabook)\b/.test(t) || /\bnotebook/.test(m);
   if (isNotebook && !accessory.test(t0) && !/\bpara (notebook|laptop|macbook)\b/.test(t)) return 'notebook';
+  if (/^(controle|controller|gamepad|joystick|mouse|teclado|headset|fone (de ouvido )?gamer)\b/.test(t0) && !/\b(capa|case|suporte|carregador|pad|mousepad|grip|bateria)\b/.test(t0.split(' ').slice(0, 2).join(' '))) return 'periferico';
+  if (/^(gamesir|8bitdo|flydigi)\b/.test(t0) || /\b(controller|controle)\b.*\b(xbox|series x|ps5|switch|hall effect|tmr)\b/.test(t)) return 'periferico';
   if (bad.test(t) && !/\bmonitor\b/.test(t)) return null;
   if (/\bmonitor\b/.test(t) && !/\b(pressao|cardiaco|bebe|baba|glicose|braco|suporte)\b/.test(t)) return 'monitor';
   if (/placa[ -]?(de )?video|\bgeforce\b|\b(rtx|gtx) ?\d{3,4}\b|\bradeon\b|\brx ?\d{4}\b|\barc [ab]\d{3}\b/.test(t) || /placa de video/.test(m)) return 'gpu';
@@ -276,6 +291,13 @@ export function extractSpecs(category, title) {
       s.tela = inches(t);
       s.hz = hz(t);
       s.painel = panel(t);
+      break;
+    }
+    case 'periferico': {
+      s.tipo = /\b(controle|controller|gamepad|joystick)\b/.test(t) ? 'Controle' : /\bmouse\b/.test(t) ? 'Mouse' : /\bteclado\b/.test(t) ? 'Teclado' : /\b(headset|fone)\b/.test(t) ? 'Headset' : null;
+      s.conexao = /\b(sem fio|wireless|bluetooth|2\.4 ?ghz|lightspeed|hyperspeed)\b/.test(t) ? 'Sem fio' : 'Com fio';
+      if (s.tipo === 'Teclado') s.switch = /\bmecanico\b/.test(t) ? 'Mecânico' : /\bmagnetic|hall effect|rapid trigger\b/.test(t) ? 'Magnético' : null;
+      if (s.tipo === 'Controle') s.plataforma = /\bxbox\b/.test(t) ? 'Xbox / PC' : /\b(ps5|playstation|dualsense)\b/.test(t) ? 'PlayStation' : /\bswitch\b/.test(t) ? 'Switch' : 'PC';
       break;
     }
     case 'mobo': {

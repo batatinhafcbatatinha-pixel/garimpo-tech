@@ -19,7 +19,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,6 +33,8 @@ jobs:
           MIN_DISCOUNT: ${{ vars.MIN_DISCOUNT || '50' }}
           NTFY_TOPIC: ${{ vars.NTFY_TOPIC }}
           NTFY_MIN_DISCOUNT: ${{ vars.NTFY_MIN_DISCOUNT || '60' }}
+          # canais públicos do Telegram (separados por vírgula); vazio = lista padrão do coletor
+          TELEGRAM_CHANNELS: ${{ vars.TELEGRAM_CHANNELS }}
         run: node scraper/scrape.mjs
       - name: Montar site
         run: |

@@ -22,6 +22,7 @@ const STORES = {
   magalu: { name: 'Magalu', c: '#0086ff' },
   mercadolivre: { name: 'Mercado Livre', c: '#ffe600' },
   shopee: { name: 'Shopee', c: '#ee4d2d' },
+  aliexpress: { name: 'AliExpress', c: '#ff4747' },
 };
 
 const ICON = {
@@ -33,6 +34,7 @@ const ICON = {
   ssd: '<rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 11h6M7 13.5h4M17 10v4"/>',
   ram: '<path d="M3 7h18v8H3z"/><path d="M6 15v3M10 15v3M14 15v3M18 15v3M7 10h2M11 10h2M15 10h2"/>',
   mobo: '<rect x="3" y="3" width="18" height="18" rx="2"/><rect x="7" y="7" width="6" height="6" rx="1"/><path d="M16 7v4M16 14h2M7 17h10"/>',
+  periferico: '<path d="M7 7h10a5 5 0 0 1 5 5v1a4 4 0 0 1-7 2.6L14 14h-4l-1 1.6A4 4 0 0 1 2 13v-1a5 5 0 0 1 5-5z"/><path d="M7 10v3M5.5 11.5h3M16 11h.01M18 13h.01"/>',
 };
 
 const CATS = [
@@ -44,6 +46,7 @@ const CATS = [
   { id: 'ssd', label: 'SSD', short: 'SSD' },
   { id: 'ram', label: 'Memória RAM', short: 'RAM' },
   { id: 'mobo', label: 'Placas-mãe', short: 'Placa-mãe' },
+  { id: 'periferico', label: 'Periféricos', short: 'Periféricos' },
 ];
 const catLabel = (id) => CATS.find((c) => c.id === id)?.label || id;
 
@@ -102,6 +105,12 @@ const FACETS = {
     ['formato', 'Formato'],
     ['wifi', 'Wi-Fi'],
   ],
+  periferico: [
+    ['tipo', 'Tipo'],
+    ['conexao', 'Conexão'],
+    ['plataforma', 'Plataforma (controles)'],
+    ['switch', 'Teclado'],
+  ],
 };
 
 const facetValue = (deal, f) => {
@@ -123,19 +132,25 @@ function specLine(d) {
     case 'ssd': push(s.capacidade && gb(s.capacidade)); push(s.interface); push(s.geracao); break;
     case 'ram': push(s.capacidade && `${s.capacidade} GB`); push(s.tipo); push(s.frequencia && `${s.frequencia} MHz`); push(s.uso === 'Notebook' ? 'SODIMM' : null); break;
     case 'mobo': push(s.chipset); push(s.ddr); push(s.formato); push(s.wifi); break;
+    case 'periferico': push(s.tipo); push(s.conexao); push(s.plataforma); push(s.switch); break;
   }
   return out.slice(0, 5);
 }
 
 // ------------------------------------------------------------------ estado
-const DEFAULT = { cat: 'all', q: '', disc: 50, pmin: '', pmax: '', coupon: false, stores: [], brands: [], spec: {}, sort: 'disc' };
+const DEFAULT = { view: 'deals', cat: 'all', q: '', disc: 50, pmin: '', pmax: '', coupon: false, stores: [], brands: [], spec: {}, sort: 'disc' };
 let S = { ...DEFAULT, ...readHash() };
 let ALL = [];
+let RADAR = [];
+let COUPONS = [];
 let META = {};
+const POOL = () => (S.view === 'radar' ? RADAR : ALL);
+const when = (d) => d.postedAt || d.firstSeen;
 
 function readHash() {
   const p = new URLSearchParams(location.hash.slice(1));
   const o = {};
+  if (['radar', 'coupons'].includes(p.get('v'))) o.view = p.get('v');
   if (p.get('cat')) o.cat = p.get('cat');
   if (p.get('q')) o.q = p.get('q');
   if (p.get('d')) o.disc = +p.get('d');
@@ -152,6 +167,7 @@ function readHash() {
 }
 function writeHash() {
   const p = new URLSearchParams();
+  if (S.view !== 'deals') p.set('v', S.view);
   if (S.cat !== 'all') p.set('cat', S.cat);
   if (S.q) p.set('q', S.q);
   if (S.disc !== 50) p.set('d', S.disc);
@@ -169,7 +185,7 @@ function writeHash() {
 // ------------------------------------------------------------------ filtragem
 function baseFilter(d, skip) {
   if (skip !== 'cat' && S.cat !== 'all' && d.category !== S.cat) return false;
-  if (d.discount < S.disc) return false;
+  if (S.view === 'deals' && d.discount < S.disc) return false;
   if (S.pmin && d.price < +S.pmin) return false;
   if (S.pmax && d.price > +S.pmax) return false;
   if (S.coupon && !d.coupon) return false;
@@ -190,9 +206,9 @@ function baseFilter(d, skip) {
 }
 
 const SORTS = {
-  disc: (a, b) => b.discount - a.discount || a.price - b.price,
-  save: (a, b) => b.oldPrice - b.price - (a.oldPrice - a.price),
-  new: (a, b) => (b.firstSeen || '').localeCompare(a.firstSeen || ''),
+  disc: (a, b) => (b.discount ?? -1) - (a.discount ?? -1) || a.price - b.price,
+  save: (a, b) => (b.oldPrice ? b.oldPrice - b.price : 0) - (a.oldPrice ? a.oldPrice - a.price : 0),
+  new: (a, b) => (when(b) || '').localeCompare(when(a) || ''),
   low: (a, b) => a.price - b.price,
   high: (a, b) => b.price - a.price,
 };
@@ -226,25 +242,41 @@ function card(d) {
     imgA.classList.add('noimg');
   }
   const badge = $('.badge', el);
-  badge.textContent = `-${d.discount}%`;
-  if (d.discount >= 70) badge.classList.add('is-insane');
-  else if (d.discount >= 60) badge.classList.add('is-hot');
-  if (d.firstSeen && Date.now() - new Date(d.firstSeen) < 3 * 3600e3) $('.fresh', el).hidden = false;
+  if (d.discount == null) {
+    badge.textContent = d.coupon ? 'CUPOM' : 'RADAR';
+    badge.classList.add('is-radar');
+  } else {
+    badge.textContent = `-${d.discount}%`;
+    if (d.discount >= 70) badge.classList.add('is-insane');
+    else if (d.discount >= 60) badge.classList.add('is-hot');
+    else if (d.discount < 50) badge.classList.add('is-low');
+  }
+  if (when(d) && Date.now() - new Date(when(d)) < 3 * 3600e3) $('.fresh', el).hidden = false;
   const s = $('.store', el);
   s.textContent = st.name;
   s.style.setProperty('--c', st.c);
   $('.brand', el).textContent = d.brand;
   const t = $('time', el);
-  t.dateTime = d.firstSeen || '';
-  t.textContent = ago(d.firstSeen);
+  t.dateTime = when(d) || '';
+  t.textContent = ago(when(d));
   const a = $('.card__title a', el);
   a.href = d.url;
   a.textContent = d.title;
   a.title = d.title;
   $('.specs', el).append(...specLine(d).map((v) => Object.assign(document.createElement('li'), { textContent: v })));
-  $('.old', el).textContent = `R$ ${brl(d.oldPrice)}`;
+  if (d.oldPrice) {
+    $('.old', el).textContent = `R$ ${brl(d.oldPrice)}`;
+    $('.save', el).textContent = `−R$ ${brl0(d.oldPrice - d.price)}`;
+  } else {
+    $('.old', el).textContent = d.coupon ? 'preço com cupom' : 'preço anunciado';
+    $('.old', el).classList.add('is-label');
+    $('.save', el).remove();
+  }
   $('.now', el).innerHTML = `<small>R$</small>${brl(d.price)}`;
-  $('.save', el).textContent = `−R$ ${brl0(d.oldPrice - d.price)}`;
+  if (d.via) {
+    const v = Object.assign(document.createElement('span'), { className: 'via', textContent: `via ${d.via}` });
+    $('.card__actions', el).after(v);
+  }
   $('.go', el).href = d.url;
   if (d.coupon) {
     const c = $('.coupon', el);
@@ -258,6 +290,36 @@ function card(d) {
     r.hidden = false;
     r.textContent = `* "De" estimado: ${d.ref.toLowerCase()}.`;
   }
+  return el;
+}
+
+function ticket(c) {
+  const el = $('#couponTpl').content.firstElementChild.cloneNode(true);
+  const st = STORES[c.store] || { name: c.store, c: '#888' };
+  const s = $('.store', el);
+  s.textContent = st.name;
+  s.style.setProperty('--c', st.c);
+  const t = $('time', el);
+  t.dateTime = when(c) || '';
+  t.textContent = ago(when(c));
+  $('.ticket__title', el).textContent = c.discount || c.title || 'Cupom';
+  if (c.rules || (c.title && c.title !== c.discount)) {
+    const r = $('.ticket__rules', el);
+    r.hidden = false;
+    r.textContent = c.rules || c.title;
+  }
+  const b = $('.coupon', el);
+  $('b', b).textContent = c.code;
+  b.title = 'Copiar cupom';
+  b.onclick = () => copy(c.code, b);
+  if (c.url) {
+    const g = $('.ticket__go', el);
+    g.hidden = false;
+    g.href = c.url;
+  }
+  const via = $('.ticket__via', el);
+  via.textContent = c.via ? `via ${c.via}` : '';
+  $('.ticket__foot', el).append(via);
   return el;
 }
 
@@ -313,7 +375,8 @@ const countBy = (list, fn) => {
 };
 
 function renderCats() {
-  const pool = ALL.filter((d) => baseFilter(d, 'cat'));
+  $('#cats').hidden = S.view === 'coupons';
+  const pool = POOL().filter((d) => baseFilter(d, 'cat'));
   const counts = countBy(pool, (d) => d.category);
   const nav = $('#cats');
   nav.replaceChildren(
@@ -342,15 +405,20 @@ function renderFacetGroup(container, title, entries) {
 }
 
 function renderFilters() {
+  const isCoupons = S.view === 'coupons';
+  $('#discGroup').hidden = S.view !== 'deals';
+  for (const id of ['#pmin', '#onlyCoupon', '#brandChips', '#specFacets']) $(id).closest('.fgroup, #specFacets').hidden = isCoupons;
   // lojas
-  const sc = countBy(ALL.filter((d) => baseFilter(d, 'store')), (d) => d.store);
+  const sc = isCoupons
+    ? countBy(COUPONS.filter((c) => couponMatch(c, true)), (c) => c.store)
+    : countBy(POOL().filter((d) => baseFilter(d, 'store')), (d) => d.store);
   $('#storeChips').replaceChildren(
     ...Object.entries(STORES).map(([k, v]) =>
       chip(v.name, S.stores.includes(k), () => { S.stores = toggle(S.stores, k); update(); }, { color: v.c, count: sc.get(k) || 0 })
     )
   );
   // marcas
-  const bc = countBy(ALL.filter((d) => baseFilter(d, 'brand')), (d) => d.brand);
+  const bc = countBy(POOL().filter((d) => baseFilter(d, 'brand')), (d) => d.brand);
   for (const b of S.brands) if (!bc.has(b)) bc.set(b, 0);
   $('#brandChips').replaceChildren(
     ...[...bc.entries()]
@@ -360,9 +428,9 @@ function renderFilters() {
   // specs da categoria
   const box = $('#specFacets');
   box.replaceChildren();
-  if (S.cat !== 'all') {
+  if (S.cat !== 'all' && !isCoupons) {
     for (const f of FACETS[S.cat] || []) {
-      const pool = ALL.filter((d) => baseFilter(d, `spec:${f[0]}`));
+      const pool = POOL().filter((d) => baseFilter(d, `spec:${f[0]}`));
       const counts = countBy(pool, (d) => facetValue(d, f));
       const sel = S.spec[f[0]] || [];
       for (const v of sel) if (!counts.has(v)) counts.set(v, 0);
@@ -420,8 +488,33 @@ function activeTags() {
   $('#activeCount').textContent = tags.length || '';
 }
 
+function couponMatch(c, skipStore) {
+  if (!skipStore && S.stores.length && !S.stores.includes(c.store)) return false;
+  if (S.q) {
+    const hay = norm(`${c.code} ${c.title} ${c.discount} ${STORES[c.store]?.name}`);
+    if (!norm(S.q).split(/\s+/).every((w) => hay.includes(w))) return false;
+  }
+  return true;
+}
+
+const NOTES = {
+  radar: 'Posts de cupom em hardware (Telegram e Promobit) que não informam o preço “de” — não dá pra garantir os 50%, mas costumam ser os melhores preços do momento. Mostrando as últimas 48 h, só marcas boas.',
+  coupons: 'Cupons gerais das lojas, das últimas 36 h. Muitos esgotam em minutos e alguns valem só para itens selecionados ou no app.',
+};
+
 function renderGrid() {
-  const list = ALL.filter((d) => baseFilter(d)).sort(SORTS[S.sort] || SORTS.disc);
+  $('#viewNote').hidden = !NOTES[S.view];
+  $('#viewNote').textContent = NOTES[S.view] || '';
+  $('.sort').hidden = S.view === 'coupons';
+  $$('.views button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === S.view)));
+  if (S.view === 'coupons') {
+    const list = COUPONS.filter((c) => couponMatch(c));
+    $('#count').innerHTML = `<b>${list.length}</b> ${list.length === 1 ? 'cupom' : 'cupons'}`;
+    $('#empty').hidden = list.length > 0;
+    grid.replaceChildren(...list.map((c, i) => Object.assign(ticket(c), { style: `animation-delay:${Math.min(i, 16) * 18}ms` })));
+    return;
+  }
+  const list = POOL().filter((d) => baseFilter(d)).sort(SORTS[S.sort] || SORTS.disc);
   $('#count').innerHTML = `<b>${list.length}</b> ${list.length === 1 ? 'oferta' : 'ofertas'}${S.cat !== 'all' ? ` em ${catLabel(S.cat).toLowerCase()}` : ''}`;
   $('#empty').hidden = list.length > 0;
   const frag = document.createDocumentFragment();
@@ -434,17 +527,17 @@ function renderGrid() {
 }
 
 function renderStats() {
-  const stores = new Set(ALL.map((d) => d.store));
-  $('#stCount').textContent = ALL.length;
+  $('#stCount').textContent = $('#vDeals').textContent = ALL.length;
   $('#stBest').textContent = ALL.length ? `-${Math.max(...ALL.map((d) => d.discount))}%` : '—';
-  $('#stCoupons').textContent = ALL.filter((d) => d.coupon).length;
-  $('#stStores').textContent = stores.size;
+  $('#stRadar').textContent = $('#vRadar').textContent = RADAR.length;
+  $('#stCoupons').textContent = $('#vCoupons').textContent = COUPONS.length;
+  if (META.telegramChannels?.length) $('#tgList').textContent = META.telegramChannels.map((c) => `@${c}`).join(', ');
   const up = $('#updated');
   const stale = META.updatedAt && Date.now() - new Date(META.updatedAt) > 3 * 3600e3;
   up.classList.toggle('is-stale', !!stale);
   $('span', up).textContent = META.updatedAt ? `atualizado ${ago(META.updatedAt)}` : 'sem dados';
   const src = META.sources || {};
-  const names = { promobit: 'Promobit', kabum: 'KaBuM API', amazon: 'Amazon', patoloco: 'Pato Loco' };
+  const names = { promobit: 'Promobit', kabum: 'KaBuM API', amazon: 'Amazon', patoloco: 'Pato Loco', pichau: 'Pichau', terabyte: 'Terabyte', telegram: 'Telegram' };
   $('#sourceStatus').innerHTML = Object.entries(src)
     .map(([k, v]) => `<span class="src ${v.ok ? '' : 'is-off'}">${names[k] || k}: ${v.ok ? `${v.count}` : 'fora do ar'}</span>`)
     .join('');
@@ -486,6 +579,15 @@ for (const id of ['pmin', 'pmax']) {
 }
 $('#onlyCoupon').addEventListener('change', (e) => { S.coupon = e.target.checked; update(); });
 $('#sort').addEventListener('change', (e) => { S.sort = e.target.value; update(); });
+$$('.views button').forEach((b) =>
+  b.addEventListener('click', () => {
+    if (S.view === b.dataset.view) return;
+    S.view = b.dataset.view;
+    S.sort = S.view === 'radar' ? 'new' : 'disc';
+    syncInputs();
+    update();
+  })
+);
 const clearAll = () => { S = { ...DEFAULT, cat: S.cat, sort: S.sort }; syncInputs(); update(); };
 $('#clearBtn').onclick = clearAll;
 $('#emptyClear').onclick = () => { S = { ...DEFAULT }; syncInputs(); update(); };
@@ -517,6 +619,8 @@ async function load() {
   const j = await r.json();
   META = j;
   ALL = (j.deals || []).filter((d) => d && d.price > 0);
+  RADAR = (j.radar || []).filter((d) => d && d.price > 0);
+  COUPONS = j.coupons || [];
   return ALL;
 }
 
@@ -525,7 +629,7 @@ function skeletons() {
 }
 
 // ------------------------------------------------------------------ alertas
-const NDEF = { on: false, min: 60, max: 100, cats: [], maxPrice: '', every: 15 };
+const NDEF = { on: false, min: 60, max: 100, cats: [], maxPrice: '', every: 15, radar: false, coupons: false };
 let N = { ...NDEF, ...store.get('alerts', {}) };
 let seen = new Set(store.get('seen', []));
 let pollT;
@@ -559,6 +663,8 @@ function openSheet() {
   $('#nMin').value = N.min;
   $('#nMax').value = N.max;
   $('#nMaxPrice').value = N.maxPrice;
+  $('#nRadar').checked = !!N.radar;
+  $('#nCoupons').checked = !!N.coupons;
   nCatsSel = [...N.cats];
   $$('input[name=nint]').forEach((r) => (r.checked = +r.value === +N.every));
   paintDual();
@@ -570,7 +676,7 @@ function openSheet() {
   if (topic) {
     $('#ntfyMin').textContent = META.ntfyMin || 60;
     $('#topics').replaceChildren(
-      ...[['', 'Todas'], ...CATS.filter((c) => c.id !== 'all').map((c) => [`-${c.id}`, c.short || c.label])].map(([suf, l]) =>
+      ...[['', 'Todas 50%+'], ...CATS.filter((c) => c.id !== 'all').map((c) => [`-${c.id}`, c.short || c.label]), ['-radar', 'Radar de cupons'], ['-cupons', 'Cupons de loja']].map(([suf, l]) =>
         Object.assign(document.createElement('a'), { href: `https://ntfy.sh/${topic}${suf}`, target: '_blank', rel: 'noopener', textContent: `${l} ↗`, title: `${topic}${suf}` })
       )
     );
@@ -593,6 +699,8 @@ $('#notifForm').addEventListener('submit', async (e) => {
     cats: nCatsSel,
     maxPrice: $('#nMaxPrice').value,
     every: +($$('input[name=nint]').find((r) => r.checked)?.value || 15),
+    radar: $('#nRadar').checked,
+    coupons: $('#nCoupons').checked,
   };
   if (N.on && 'Notification' in window && Notification.permission !== 'granted') {
     const p = await Notification.requestPermission();
@@ -600,7 +708,7 @@ $('#notifForm').addEventListener('submit', async (e) => {
   }
   store.set('alerts', N);
   // ao ativar, o que já está na tela conta como visto — só avisamos do que for novo
-  if (N.on) { ALL.forEach((d) => seen.add(d.id)); saveSeen(); }
+  if (N.on) { [...ALL, ...RADAR, ...COUPONS].forEach((d) => seen.add(d.id)); saveSeen(); }
   sheet.close();
   armPolling();
   paintBell();
@@ -624,8 +732,15 @@ function matchAlert(d) {
 function saveSeen() { store.set('seen', [...seen].slice(-3000)); }
 
 async function showNotif(d) {
-  const title = d ? `-${d.discount}% · ${d.title.slice(0, 70)}` : 'Garimpo';
-  const body = d ? `R$ ${brl(d.price)} (era R$ ${brl(d.oldPrice)}) · ${STORES[d.store]?.name}${d.coupon ? ` · cupom ${d.coupon}` : ''}` : 'Notificações funcionando!';
+  let title = 'Garimpo';
+  let body = 'Notificações funcionando!';
+  if (d?.couponItem) {
+    title = d.title;
+    body = d.body;
+  } else if (d) {
+    title = `${d.discount != null ? `-${d.discount}%` : '🎟 Radar'} · ${d.title.slice(0, 70)}`;
+    body = `R$ ${brl(d.price)}${d.oldPrice ? ` (era R$ ${brl(d.oldPrice)})` : ''} · ${STORES[d.store]?.name}${d.coupon ? ` · cupom ${d.coupon}` : ''}`;
+  }
   const opts = { body, icon: d?.image || 'assets/icon-192.png', badge: 'assets/icon-192.png', tag: d?.id || 'test', data: { url: d?.url || location.href } };
   try {
     const reg = await navigator.serviceWorker?.ready;
@@ -639,8 +754,17 @@ async function poll() {
   try {
     await load();
     const fresh = ALL.filter((d) => !seen.has(d.id));
-    fresh.forEach((d) => seen.add(d.id));
+    const freshRadar = RADAR.filter((d) => !seen.has(d.id));
+    const freshCoupons = COUPONS.filter((c) => !seen.has(c.id));
+    [...fresh, ...freshRadar, ...freshCoupons].forEach((d) => seen.add(d.id));
     saveSeen();
+    if (N.radar) {
+      const r = freshRadar.filter((d) => (!N.cats.length || N.cats.includes(d.category)) && (!N.maxPrice || d.price <= +N.maxPrice));
+      for (const d of r.slice(0, 3)) await showNotif({ ...d, radarItem: true });
+    }
+    if (N.coupons) {
+      for (const c of freshCoupons.slice(0, 3)) await showNotif({ couponItem: true, id: c.id, title: `Cupom ${STORES[c.store]?.name}: ${c.code}`, body: c.discount || c.title || '', url: c.url || location.href });
+    }
     const hits = fresh.filter(matchAlert).sort(SORTS.disc);
     for (const d of hits.slice(0, 5)) await showNotif(d);
     if (hits.length > 5) showNotif({ id: 'more', discount: hits[5].discount, title: `+${hits.length - 5} ofertas novas no Garimpo`, price: hits[5].price, oldPrice: hits[5].oldPrice, store: hits[5].store, url: location.href });

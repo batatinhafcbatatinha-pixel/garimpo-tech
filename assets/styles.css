@@ -134,6 +134,22 @@ kbd { font: 500 11px/1 var(--f-mono); color: var(--muted); border: 1px solid var
 #stBest { color: var(--accent); }
 :root[data-theme='light'] #stBest { color: #5c7a00; }
 
+/* ============ Views (50%+ / radar / cupons) ============ */
+.views { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.views button {
+  position: relative; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; column-gap: 12px; align-items: center;
+  text-align: left; padding: 13px 16px; border-radius: 14px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); color: var(--text-2); transition: all 0.15s;
+}
+.views button:hover { border-color: var(--line-2); color: var(--text); }
+.views b { font: 700 15px/1.2 var(--f-display); letter-spacing: -0.01em; color: var(--text); }
+.views span { grid-column: 1; font-size: 12px; color: var(--muted); }
+.views small { grid-row: 1 / span 2; grid-column: 2; font: 700 18px/1 var(--f-mono); color: var(--text-2); }
+.views button[aria-selected='true'] { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: linear-gradient(180deg, var(--accent-soft), transparent 140%), var(--surface); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent) inset; }
+.views button[aria-selected='true'] small { color: var(--accent); }
+:root[data-theme='light'] .views button[aria-selected='true'] small { color: #5c7a00; }
+.viewnote { margin: -4px 0 16px; padding: 10px 14px; border-radius: 12px; background: var(--surface); border: 1px dashed var(--line-2); color: var(--text-2); font-size: 12.5px; }
+
 /* ============ Categories ============ */
 .cats { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 18px; scrollbar-width: none; }
 .cats::-webkit-scrollbar { display: none; }
@@ -239,6 +255,9 @@ input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border-radius
 }
 .badge.is-hot { background: var(--hot); color: #fff; }
 .badge.is-insane { background: #111; color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+.badge.is-radar { background: #111; color: #fff; font-size: 11px; letter-spacing: 0.08em; padding: 7px 8px; }
+.badge.is-low { background: #2a2f39; color: #dfe3ea; }
+.via { font-family: var(--f-mono); font-size: 11px; color: var(--muted); }
 .fresh { position: absolute; top: 10px; right: 10px; font: 700 10px/1 var(--f-mono); text-transform: uppercase; letter-spacing: 0.08em; padding: 6px 7px; border-radius: 7px; background: #111; color: #fff; }
 .card__body { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px 16px; flex: 1; }
 .card__meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); min-width: 0; }
@@ -274,6 +293,28 @@ input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .go:hover { filter: brightness(0.9); }
 .go svg { width: 15px; height: 15px; }
 .ref { margin: -2px 0 0; font-size: 11px; color: var(--muted); }
+
+/* ============ Ticket (cupom de loja) ============ */
+.ticket {
+  position: relative; display: flex; flex-direction: column; gap: 10px; padding: 16px 16px 14px;
+  border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); box-shadow: var(--shadow);
+  animation: rise 0.35s cubic-bezier(.2,.7,.3,1) both;
+}
+.ticket::before, .ticket::after { content: ''; position: absolute; top: 58%; width: 16px; height: 16px; border-radius: 50%; background: var(--bg); border: 1px solid var(--line); }
+.ticket::before { left: -9px; clip-path: inset(0 0 0 50%); }
+.ticket::after { right: -9px; clip-path: inset(0 50% 0 0); }
+.ticket__top { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); }
+.ticket__top time { font-family: var(--f-mono); font-size: 11px; }
+.ticket__title { margin: 0; font: 700 20px/1.2 var(--f-display); letter-spacing: -0.02em; }
+.ticket__rules { margin: 0; font-size: 12px; color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ticket__foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: auto; padding-top: 12px; border-top: 1px dashed var(--line-2); }
+.ticket__foot .coupon { flex: 1 1 100%; }
+.ticket__foot .coupon b { font-size: 14px; }
+.ticket__go { margin-left: auto; }
+.old.is-label { text-decoration: none; font-family: var(--f-body); font-size: 11.5px; }
+.ticket__go { font-weight: 600; font-size: 13px; color: var(--text-2); padding: 0 6px; white-space: nowrap; }
+.ticket__go:hover { color: var(--text); }
+.ticket__via { margin: 0; font: 500 11px/1 var(--f-mono); color: var(--muted); }
 
 .skeleton { border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); height: 420px; position: relative; overflow: hidden; }
 .skeleton::after { content: ''; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,0.04) 50%, transparent 70%); animation: shimmer 1.3s infinite; }
@@ -351,6 +392,11 @@ input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border-radius
   .live span { display: none; }
 }
 @media (max-width: 640px) {
+  .views { gap: 6px; }
+  .views button { padding: 10px; grid-template-columns: 1fr; }
+  .views b { font-size: 13px; }
+  .views span { display: none; }
+  .views small { grid-row: auto; grid-column: 1; font-size: 15px; margin-top: 4px; }
   .topbar__in { flex-wrap: wrap; height: auto; padding-block: 10px; gap: 10px; }
   .search { order: 3; flex-basis: 100%; max-width: none; }
   .topbar__right { margin-left: auto; }

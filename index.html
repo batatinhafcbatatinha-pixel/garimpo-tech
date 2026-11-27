@@ -44,12 +44,18 @@
       <h1>Metade do preço<br /><em>ou nem aparece aqui.</em></h1>
     </div>
     <dl class="stats" id="stats">
-      <div><dt>ofertas agora</dt><dd id="stCount">—</dd></div>
+      <div><dt>ofertas 50%+</dt><dd id="stCount">—</dd></div>
       <div><dt>maior desconto</dt><dd id="stBest">—</dd></div>
-      <div><dt>com cupom</dt><dd id="stCoupons">—</dd></div>
-      <div><dt>lojas ativas</dt><dd id="stStores">—</dd></div>
+      <div><dt>radar de cupons</dt><dd id="stRadar">—</dd></div>
+      <div><dt>cupons de loja</dt><dd id="stCoupons">—</dd></div>
     </dl>
   </section>
+
+  <div class="views wrap" role="tablist" aria-label="O que mostrar">
+    <button role="tab" data-view="deals" aria-selected="true"><b>50%+ OFF</b><span>desconto comprovado</span><small id="vDeals">0</small></button>
+    <button role="tab" data-view="radar" aria-selected="false"><b>Radar de cupons</b><span>posts do Telegram e Promobit</span><small id="vRadar">0</small></button>
+    <button role="tab" data-view="coupons" aria-selected="false"><b>Cupons de loja</b><span>ML, Amazon, Shopee, Magalu…</span><small id="vCoupons">0</small></button>
+  </div>
 
   <nav class="cats wrap" id="cats" aria-label="Categorias"></nav>
 
@@ -61,7 +67,7 @@
         <button class="iconbtn filters__close" id="closeFilters" aria-label="Fechar filtros">✕</button>
       </div>
 
-      <section class="fgroup">
+      <section class="fgroup" id="discGroup">
         <h3>Desconto mínimo <output id="discOut">50%</output></h3>
         <input type="range" id="disc" min="50" max="90" step="5" value="50" />
         <div class="ticks"><span>50</span><span>60</span><span>70</span><span>80</span><span>90</span></div>
@@ -112,6 +118,7 @@
           </select>
         </label>
       </div>
+      <p class="viewnote" id="viewNote" hidden></p>
       <div class="grid" id="grid" aria-live="polite"></div>
       <div class="empty" id="empty" hidden>
         <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M32 6 55 19v26L32 58 9 45V19z"/><path d="M24 30h16M24 37h10"/></svg>
@@ -120,7 +127,7 @@
         <button class="btn" id="emptyClear">Limpar filtros</button>
       </div>
       <footer class="foot">
-        <p>Dados coletados automaticamente a cada ~30 min de KaBuM, Amazon, Pato Loco e do agregador Promobit (cupons de Amazon, Magalu, Mercado Livre, Shopee, KaBuM, Pichau e Terabyte). O desconto é calculado sobre o preço “de” anunciado pela loja — confira sempre na página antes de comprar.</p>
+        <p>Dados coletados automaticamente a cada ~30 min: KaBuM, Pichau, Terabyte, Amazon e Pato Loco direto das lojas; Mercado Livre, Shopee, AliExpress, Magalu e cupons pelo Promobit e por canais públicos do Telegram (<span id="tgList">@pcdofafapromo, @ofertasbenevides, @ofertasdecomputador</span>). O desconto é calculado sobre o preço “de” anunciado pela loja — confira sempre na página antes de comprar.</p>
         <p id="sourceStatus"></p>
       </footer>
     </section>
@@ -151,6 +158,12 @@
       <section class="fgroup">
         <h3>Categorias</h3>
         <div class="chips" id="nCats"></div>
+      </section>
+
+      <section class="fgroup">
+        <h3>Também me avise de</h3>
+        <label class="switch"><input type="checkbox" id="nRadar" /><span></span> Radar de cupons <small class="muted">(posts sem % comprovado)</small></label>
+        <label class="switch" style="margin-top:10px"><input type="checkbox" id="nCoupons" /><span></span> Cupons de loja novos</label>
       </section>
 
       <section class="fgroup">
@@ -206,6 +219,22 @@
         </div>
         <p class="ref" hidden></p>
       </div>
+    </article>
+  </template>
+
+  <template id="couponTpl">
+    <article class="ticket">
+      <div class="ticket__top">
+        <span class="store"></span>
+        <time></time>
+      </div>
+      <h3 class="ticket__title"></h3>
+      <p class="ticket__rules" hidden></p>
+      <div class="ticket__foot">
+        <button class="coupon" type="button"><span>CUPOM</span><b></b><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg></button>
+        <a class="ticket__go" target="_blank" rel="noopener" hidden>abrir ↗</a>
+      </div>
+      <p class="ticket__via"></p>
     </article>
   </template>
 

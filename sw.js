@@ -1,5 +1,5 @@
 // Service worker: notificações + cache leve do "casco" do site.
-const SHELL = 'garimpo-v1';
+const SHELL = 'garimpo-v2';
 const ASSETS = ['./', 'index.html', 'assets/styles.css', 'assets/app.js', 'assets/icon.svg', 'assets/icon-192.png'];
 
 self.addEventListener('install', (e) => {

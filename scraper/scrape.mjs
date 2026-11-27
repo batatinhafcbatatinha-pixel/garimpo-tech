@@ -1,13 +1,22 @@
 // Coletor de ofertas — roda no GitHub Actions (Node 20+, sem dependências).
-// Junta fontes diretas (KaBuM API, Amazon, Pato Loco) com o agregador Promobit
-// (que cobre cupons de Amazon, Magalu, Mercado Livre, Shopee, KaBuM, Pichau, Terabyte),
-// filtra por >= MIN_DISCOUNT, só produtos novos, só marcas boas, e grava data/deals.json.
+// Fontes: KaBuM (API), Amazon, Pato Loco, Pichau e Terabyte (Chrome headless), Promobit e
+// canais públicos do Telegram (cupons de Mercado Livre, Shopee, AliExpress, Amazon, Magalu...).
+// Saída (data/deals.json):
+//   deals   — ofertas com >= MIN_DISCOUNT comprovado, só novos, só marcas boas
+//   radar   — posts de cupom em hardware sem como comprovar os 50% (últimas RADAR_HOURS)
+//   coupons — cupons gerais de loja (ex.: "R$ 250 OFF acima de R$ 999")
 
 import { writeFile, readFile, mkdir } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { detectCategory, detectBrand, extractSpecs, isNew, strip } from './classify.mjs';
 
 const MIN_DISCOUNT = +(process.env.MIN_DISCOUNT || 50);
 const KEEP_HOURS = +(process.env.KEEP_HOURS || 72);
+const RADAR_HOURS = +(process.env.RADAR_HOURS || 48);
+const COUPON_HOURS = +(process.env.COUPON_HOURS || 36);
 const OUT = new URL('../data/deals.json', import.meta.url);
 const PREV_URL = process.env.PREV_URL || '';
 const NTFY_TOPIC = process.env.NTFY_TOPIC || '';
@@ -32,21 +41,46 @@ export const STORES = {
   magalu: 'Magalu',
   mercadolivre: 'Mercado Livre',
   shopee: 'Shopee',
+  aliexpress: 'AliExpress',
 };
 
 const storeKey = (name = '', domain = '') => {
   const s = strip(`${name} ${domain}`);
-  if (/amazon/.test(s)) return 'amazon';
+  if (/aliexpress/.test(s)) return 'aliexpress';
+  if (/amazon|amzn|link\.amazon/.test(s)) return 'amazon';
   if (/kabum/.test(s)) return 'kabum';
   if (/pichau/.test(s)) return 'pichau';
   if (/terabyte/.test(s)) return 'terabyte';
   if (/pato ?loco/.test(s)) return 'patoloco';
   if (/\bgk\b|gkinfo/.test(s)) return 'gk';
   if (/magazine|magalu/.test(s)) return 'magalu';
-  if (/mercado ?livre|mercadolivre/.test(s)) return 'mercadolivre';
+  if (/mercado ?livre|mercadolivre|meli\.la|\bmeli\b/.test(s)) return 'mercadolivre';
   if (/shopee/.test(s)) return 'shopee';
   return null;
 };
+
+// loja a partir do link do post (encurtadores de afiliado inclusos)
+const storeFromUrl = (u) => {
+  let h;
+  try {
+    h = new URL(u).hostname.replace(/^www\./, '');
+  } catch {
+    return null;
+  }
+  if (/(^|\.)meli\.la$|mercadolivre\.com|mercadolibre\.com/.test(h)) return 'mercadolivre';
+  if (/shopee\.com\.br|shope\.ee/.test(h)) return 'shopee';
+  if (/aliexpress\.com|s\.click\.aliexpress/.test(h)) return 'aliexpress';
+  if (/amazon\.com\.br|amzn\.to|link\.amazon|a\.co$/.test(h)) return 'amazon';
+  if (/kabum\.com\.br|tidd\.ly/.test(h)) return 'kabum';
+  if (/pichau\.com\.br/.test(h)) return 'pichau';
+  if (/terabyteshop\.com\.br/.test(h)) return 'terabyte';
+  if (/magazineluiza\.com\.br|magazinevoce\.com\.br|magalu\.com/.test(h)) return 'magalu';
+  if (/patoloco\.com\.br/.test(h)) return 'patoloco';
+  return null;
+};
+
+// Corrige texto UTF-8 lido como Latin-1 ("MemÃ³ria" -> "Memória")
+const fixMojibake = (s) => (/Ã[\x80-\xBF]|Ã§|Ã£|Ã©|Ãª|Ã³|Ãµ|Ã¡|Ã­|Ãº/.test(s) ? Buffer.from(s, 'latin1').toString('utf8') : s);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function get(url, { json = false, headers = {}, tries = 2 } = {}) {
@@ -69,11 +103,13 @@ const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const round2 = (n) => Math.round(n * 100) / 100;
 
 // ------------------------------------------------------------------ normalização
+// raw.radar = true: se não der pra comprovar os 50% (post de cupom sem preço "de"),
+// o item vai para o "Radar de cupons" em vez de ser descartado.
 function makeDeal(raw) {
   const { title, price } = raw;
   let oldPrice = raw.oldPrice;
   if (!title || !(price > 0)) return null;
-  if (!(oldPrice > price) && !raw.allowRef) return null;
+  if (!(oldPrice > price) && !raw.allowRef && !raw.radar) return null;
   if (!isNew(title)) return null;
   const category = detectCategory(title, raw.menu);
   if (!category) return null;
@@ -89,10 +125,18 @@ function makeDeal(raw) {
       ref = 'Preço regular do mesmo modelo no KaBuM';
     }
   }
-  if (!(oldPrice > price)) return null;
-  const discount = Math.round((1 - price / oldPrice) * 100);
-  if (discount < MIN_DISCOUNT || discount > 97) return null;
+  let discount = oldPrice > price ? Math.round((1 - price / oldPrice) * 100) : null;
+  if (discount != null && discount > 97) return null;
+  let radar = false;
+  if (discount == null || discount < MIN_DISCOUNT) {
+    if (!raw.radar) return null;
+    radar = true;
+  }
+  if (discount == null) oldPrice = null;
   return {
+    ...(radar ? { radar: true } : {}),
+    ...(raw.via ? { via: raw.via } : {}),
+    ...(raw.postedAt ? { postedAt: raw.postedAt } : {}),
     ref,
     id: raw.id,
     store: raw.store,
@@ -100,7 +144,7 @@ function makeDeal(raw) {
     brand,
     category,
     price: round2(price),
-    oldPrice: round2(oldPrice),
+    oldPrice: oldPrice ? round2(oldPrice) : null,
     discount,
     coupon: raw.coupon || null,
     url: raw.url,
@@ -151,13 +195,17 @@ function fromPromobitOffer(o) {
   const oldPrice = +o.offerOldPrice;
   if (!(price > 1)) return null;
   const photo = o.offerPhoto ? `https://i.promobit.com.br/268${o.offerPhoto.startsWith('/') ? '' : '/'}${o.offerPhoto}` : null;
+  const coupon = typeof o.offerCoupon === 'string' && o.offerCoupon.length < 40 ? o.offerCoupon.trim() : null;
   return makeDeal({
     id: `pb-${o.offerId}`,
     store,
     title: o.offerTitle,
     price,
     oldPrice,
-    coupon: typeof o.offerCoupon === 'string' && o.offerCoupon.length < 40 ? o.offerCoupon.trim() : null,
+    coupon,
+    radar: !!coupon,
+    via: 'Promobit',
+    postedAt: o.offerPublished,
     url: `https://www.promobit.com.br/oferta/${o.offerSlug}/`,
     image: photo,
     source: 'Promobit',
@@ -193,6 +241,21 @@ async function promobit() {
   const seen = new Set();
   let ok = 0;
   const take = (pp) => {
+    for (const c of [pp?.serverCoupons, pp?.couponsByStore].flat().filter(Boolean)) {
+      const store = storeKey(c.storeName, c.storeDomain);
+      if (!store || !c.couponCode || c.couponStatusName && !/APPROVED/i.test(c.couponStatusName)) continue;
+      addCoupon({
+        id: `pbc-${c.couponId}`,
+        store,
+        code: String(c.couponCode).trim(),
+        title: c.couponTitle || `${c.couponDiscount || ''} ${c.couponDiscountOn || ''}`.trim(),
+        discount: c.couponDiscountShort || c.couponDiscount || null,
+        rules: (c.couponInstructions || '').slice(0, 260) || null,
+        url: c.couponUrl ? `https://www.promobit.com.br${c.couponUrl}` : null,
+        postedAt: c.couponPublished ? new Date(c.couponPublished.replace(/([+-]\d{2})(\d{2})$/, '$1:$2')).toISOString() : null,
+        via: 'Promobit',
+      });
+    }
     const lists = [pp?.serverOffers?.offers, pp?.serverFeaturedOffers, pp?.sidebarFeaturedOffers, pp?.fixedOffer]
       .flat()
       .filter(Boolean);
@@ -380,6 +443,270 @@ async function patoloco() {
   return { deals: out, ok: ok > 0 };
 }
 
+// ------------------------------------------------------------------ cupons de loja
+const COUPONS = new Map();
+const OFF_TOPIC = /\b(pet|casa|decora|moda|beleza|perfum|supermercado|mercado(?! livre)|fralda|livro|roupa|cal[cç]ado|t[eê]nis|brinquedo|alimento|bebida|farm[aá]cia|sa[uú]de|watch|rel[oó]gio|viagem|passagem|hotel|ifood|delivery|uber)\b/i;
+function addCoupon(c) {
+  if (!c.code || !/^[A-Z0-9][A-Z0-9_-]{3,30}$/i.test(c.code) || NOT_CODE.test(c.code.toUpperCase())) return;
+  if (OFF_TOPIC.test(`${c.title || ''} ${c.code}`)) return;
+  const clean = (s) => s && s.replace(/\s*[:\-–]\s*cupom\s*$/i, '').trim();
+  c.title = clean(c.title);
+  c.discount = clean(c.discount);
+  const key = `${c.store}|${c.code.toUpperCase()}`;
+  const ex = COUPONS.get(key);
+  // o mais recente vence (traz o texto atualizado do cupom)
+  if (!ex || (c.postedAt || '') > (ex.postedAt || '')) COUPONS.set(key, { ...c, code: c.code.toUpperCase(), id: key });
+}
+
+// ------------------------------------------------------------------ Telegram (canais públicos de promoção)
+// t.me/s/<canal> é a prévia pública do canal: HTML simples, sem login. É de onde vêm os posts do tipo
+// "Processador AMD Ryzen 7 5700X - R$895 - Cupom BAIXOU - meli.la/...".
+const TG_CHANNELS = (process.env.TELEGRAM_CHANNELS || 'pcdofafapromo,ofertasbenevides,ofertasdecomputador,EconoMister,LinksBrazil')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+const tgText = (html) =>
+  decodeHtml(
+    html
+      .replace(/<br\s*\/?>/g, '\n')
+      .replace(/<a [^>]*href="([^"]+)"[^>]*>[\s\S]*?<\/a>/g, ' $1 ')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&#036;/g, '$')
+  );
+// códigos de cupom são sempre em MAIÚSCULAS nos posts; a palavra "cupom" pode vir de qualquer jeito
+const COUPON_RE = /[Cc][Uu][Pp][Oo][MmNn][Ss]?\s*:?\s*([A-Z0-9][A-Z0-9_-]{3,30})\b(?:\s*\+\s*([A-Z0-9][A-Z0-9_-]{3,30})\b)?/;
+const NOT_CODE = /^(HTTPS?|DESTA|DESSA|DESCONTO|LOJA|APP|NO|NA|PARA|VALIDO|ABAIXO|ACIMA|EXCLUSIVO|AQUI|LINK|OFF)$/;
+const SKIP_LINK = /t\.me\/|telegram|nerdofertas|ofertou\.ai|promoavisa|whatsapp|instagram|bit\.ly\/grupo/i;
+
+function parseTelegramPost(text, meta) {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return;
+  const head = lines[0]
+    .replace(/^[^\p{L}\p{N}]+/u, '')
+    .replace(/\s*[-–|]\s*(por\s*)?R\$\s*[\d.,]+.*$/i, '')
+    .trim();
+  const urls = [...text.matchAll(/https?:\/\/[^\s<>"']+/g)].map((m) => m[0]).filter((u) => !SKIP_LINK.test(u));
+  const url = urls[0];
+  const store = (url && storeFromUrl(url)) || storeKey(head);
+  if (/esgot|encerrad|acabou/i.test(text.slice(0, 120))) return;
+
+  // Post de cupom de loja: "Novo Cupom Mercado Livre — R$250 OFF EM R$ 999: ZB9MELI"
+  if (/^(novo )?cupo[mn]s?\b|cupo[mn]s? (de )?(desconto )?(mercado livre|amazon|shopee|magalu|kabum|pichau|terabyte|aliexpress)/i.test(head) && store) {
+    for (const l of lines.slice(1)) {
+      const m = /(.*?(?:off|%|desconto).*?)[:\-–]\s*([A-Z0-9][A-Z0-9_-]{3,30})\s*$/i.exec(l.replace(/^[^\p{L}\p{N}R$]+/u, ''));
+      if (m) addCoupon({ store, code: m[2], title: m[1].trim(), discount: m[1].trim(), url, postedAt: meta.postedAt, via: `@${meta.channel}` });
+    }
+    return;
+  }
+
+  // Post de produto
+  const pm = /R\$\s*([\d.]+(?:,\d{2})?)/.exec(text);
+  if (!pm || !store || !url) return;
+  const price = brl(pm[1].includes(',') ? pm[1] : `${pm[1]},00`);
+  const cm = COUPON_RE.exec(text);
+  const coupon = cm ? [cm[1], cm[2]].filter((c) => c && !NOT_CODE.test(c)).join(' + ') || null : null;
+  const om = /(?:de|era)\s*:?\s*R\$\s*([\d.]+(?:,\d{2})?)\s*(?:por|→|->)/i.exec(text);
+  return makeDeal({
+    id: `tg-${meta.channel}-${meta.postId}`,
+    store,
+    title: head,
+    price,
+    oldPrice: om ? brl(om[1].includes(',') ? om[1] : `${om[1]},00`) : 0,
+    coupon,
+    url,
+    image: meta.image,
+    source: 'Telegram',
+    via: `@${meta.channel}`,
+    postedAt: meta.postedAt,
+    allowRef: true,
+    radar: true,
+  });
+}
+
+async function telegram() {
+  const out = [];
+  let ok = 0;
+  await Promise.all(
+    TG_CHANNELS.map(async (ch) => {
+      let before = '';
+      for (let page = 0; page < 4; page++) {
+        try {
+          const html = await get(`https://t.me/s/${ch}${before ? `?before=${before}` : ''}`);
+          ok++;
+          const posts = html.split('tgme_widget_message_wrap').slice(1);
+          if (!posts.length) break;
+          let minId = Infinity;
+          for (const p of posts) {
+            const dp = /data-post="([^"/]+)\/(\d+)"/.exec(p);
+            if (!dp) continue;
+            minId = Math.min(minId, +dp[2]);
+            const body = /tgme_widget_message_text[^>]*>([\s\S]*?)<\/div>/.exec(p)?.[1];
+            if (!body) continue;
+            const d = parseTelegramPost(tgText(body), {
+              channel: dp[1],
+              postId: dp[2],
+              postedAt: /datetime="([^"]+)"/.exec(p)?.[1] ? new Date(/datetime="([^"]+)"/.exec(p)[1]).toISOString() : null,
+              image: /tgme_widget_message_photo_wrap[^>]*background-image:url\('([^']+)'\)/.exec(p)?.[1] || null,
+            });
+            if (d) out.push(d);
+          }
+          if (!isFinite(minId)) break;
+          before = String(minId);
+          await sleep(500);
+        } catch (e) {
+          log('telegram', ch, e.message);
+          break;
+        }
+      }
+    })
+  );
+  // o mesmo produto costuma ser postado em vários canais: fica o primeiro
+  const uniq = new Map();
+  for (const d of out.sort((a, b) => (a.postedAt || '').localeCompare(b.postedAt || ''))) {
+    const k = `${d.store}|${strip(d.title).slice(0, 50)}|${Math.round(d.price)}`;
+    if (!uniq.has(k)) uniq.set(k, d);
+  }
+  const deals = [...uniq.values()];
+  log(`telegram: ${deals.length} itens de hardware (${deals.filter((d) => !d.radar).length} com 50%+), ${COUPONS.size} cupons até agora`);
+  return { deals, ok: ok > 0 };
+}
+
+// ------------------------------------------------------------------ navegador headless
+// Pichau e Terabyte ficam atrás do Cloudflare, que recusa o fetch do Node e o curl,
+// mas libera um Chrome de verdade (mesma técnica do garimpo-vagas).
+
+const BROWSER_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36';
+function findBrowser() {
+  const c = [
+    process.env.BROWSER_PATH,
+    'C:/Program Files/Google/Chrome/Application/chrome.exe',
+    'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+    `${process.env.LOCALAPPDATA}/Google/Chrome/Application/chrome.exe`,
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+  ];
+  return c.find((p) => p && existsSync(p)) || null;
+}
+const BROWSER = findBrowser();
+let busy = 0;
+const queue = [];
+async function slot(fn) {
+  if (busy >= 2) await new Promise((r) => queue.push(r));
+  busy++;
+  try {
+    return await fn();
+  } finally {
+    busy--;
+    queue.shift()?.();
+  }
+}
+function browserOnce(url, waitMs) {
+  const profile = mkdtempSync(join(tmpdir(), 'garimpo-'));
+  const args = [
+    '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+    '--disable-blink-features=AutomationControlled', `--user-agent=${BROWSER_UA}`, '--lang=pt-BR',
+    `--user-data-dir=${profile}`, `--virtual-time-budget=${waitMs}`, '--dump-dom', url,
+  ];
+  if (process.platform === 'linux') args.unshift('--no-sandbox', '--disable-dev-shm-usage');
+  return new Promise((resolve, reject) => {
+    execFile(BROWSER, args, { maxBuffer: 1 << 27, windowsHide: true, timeout: 120000 }, (err, stdout) => {
+      setTimeout(() => rmSync(profile, { recursive: true, force: true }), 1500);
+      if (err && !stdout) return reject(new Error(`navegador falhou: ${err.killed ? 'timeout' : err.message.split('\n')[0].slice(0, 100)}`));
+      resolve(stdout);
+    });
+  });
+}
+async function browserHtml(url, { waitMs = 15000, ok } = {}) {
+  if (!BROWSER) throw new Error('nenhum Chrome/Edge encontrado');
+  for (let i = 0; i < 2; i++) {
+    const html = await slot(() => browserOnce(url, waitMs)).catch((e) => (i ? Promise.reject(e) : ''));
+    if (html && (!ok || ok(html))) return html;
+    await sleep(3000);
+  }
+  throw new Error('bloqueado (desafio do Cloudflare não passou)');
+}
+
+// ------------------------------------------------------------------ Pichau (via navegador)
+async function pichau() {
+  const paths = [
+    'hardware/placa-de-video', 'hardware/placa-de-video?page=2', 'hardware/processadores', 'hardware/memorias',
+    'hardware/ssd', 'hardware/placa-mae', 'monitores', 'notebooks',
+  ];
+  const out = [];
+  let ok = 0;
+  const seen = new Set();
+  await Promise.all(
+    paths.map(async (p) => {
+      try {
+        const html = await browserHtml(`https://www.pichau.com.br/${p}`, { ok: (h) => h.includes('data-cy="list-product"') });
+        ok++;
+        let n = 0;
+        for (const block of html.split('data-cy="list-product" href="').slice(1)) {
+          const card = block.slice(0, 7000);
+          const href = card.slice(0, card.indexOf('"'));
+          if (seen.has(href)) continue;
+          seen.add(href);
+          n++;
+          const title = decodeHtml(/<h2[^>]*>([^<]+)<\/h2>/.exec(card)?.[1] || /title="([^"]+)"/.exec(card)?.[1] || '');
+          const oldPrice = brl(/strikeThrough">R\$(?:&nbsp;|\s)?([\d.,]+)/.exec(card)?.[1] || '');
+          const price = brl(/price_vista">R\$(?:&nbsp;|\s)?([\d.,]+)/.exec(card)?.[1] || '');
+          const img = /<img[^>]+src="(https:\/\/media\.pichau[^"]+)"/.exec(card)?.[1];
+          const d = makeDeal({ id: `pc-${href.replace(/^\//, '').slice(0, 90)}`, store: 'pichau', title, price, oldPrice, url: `https://www.pichau.com.br${href}`, image: img, source: 'Pichau' });
+          if (d) out.push(d);
+        }
+        log(`pichau ${p}: ${n} produtos`);
+      } catch (e) {
+        log('pichau', p, e.message);
+      }
+    })
+  );
+  log(`pichau: ${out.length} aprovadas`);
+  return { deals: out, ok: ok > 0 };
+}
+
+// ------------------------------------------------------------------ Terabyte (via navegador)
+async function terabyte() {
+  const paths = ['hardware/placas-de-video', 'hardware/processadores', 'hardware/memorias', 'hardware/hard-disk/ssd', 'hardware/placas-mae', 'monitores', 'notebooks'];
+  const out = [];
+  let ok = 0;
+  const seen = new Set();
+  await Promise.all(
+    paths.map(async (p) => {
+      try {
+        const html = await browserHtml(`https://www.terabyteshop.com.br/${p}`, { ok: (h) => h.includes('product-item__name') });
+        ok++;
+        let n = 0;
+        const re = /class="product-item__name"/g;
+        let hit;
+        while ((hit = re.exec(html))) {
+          const card = html.slice(hit.index, hit.index + 5000);
+          const m = /href="(https:\/\/www\.terabyteshop\.com\.br\/produto\/(\d+)\/[^"]+)" title="([^"]+)"/.exec(card);
+          if (!m || seen.has(m[2])) continue;
+          seen.add(m[2]);
+          n++;
+          const oldPrice = brl(/old-price">\s*<del>De:\s*<span>R\$\s?([\d.,]+)/.exec(card)?.[1] || '');
+          const price = brl(/new-price">\s*<span>R\$\s?([\d.,]+)/.exec(card)?.[1] || '');
+          // a imagem vem logo antes do nome no card
+          const before = html.slice(Math.max(0, hit.index - 2500), hit.index);
+          const imgs = [...before.matchAll(/src="(https:\/\/img\.terabyteshop\.com\.br\/produto\/[^"]+)"/g)];
+          const img = imgs.length ? imgs[imgs.length - 1][1] : null;
+          const d = makeDeal({ id: `tb-${m[2]}`, store: 'terabyte', title: fixMojibake(decodeHtml(m[3])), price, oldPrice, url: m[1], image: img, source: 'Terabyte' });
+          if (d) out.push(d);
+        }
+        log(`terabyte ${p}: ${n} produtos`);
+      } catch (e) {
+        log('terabyte', p, e.message);
+      }
+    })
+  );
+  log(`terabyte: ${out.length} aprovadas`);
+  return { deals: out, ok: ok > 0 };
+}
+
 // ------------------------------------------------------------------ merge + saída
 async function loadPrevious() {
   try {
@@ -397,32 +724,77 @@ async function loadPrevious() {
   }
 }
 
-async function notify(newDeals) {
+const money = (n) => n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const asciiTitle = (s) => s.slice(0, 120).replace(/[^\x20-\x7E\u00C0-\u00FF]/g, '').trim();
+async function ntfy(topic, { title, body, prio = 3, tags, click, image }) {
+  try {
+    await fetch(`https://ntfy.sh/${topic}`, {
+      method: 'POST',
+      body,
+      headers: {
+        Title: asciiTitle(title),
+        Priority: String(prio),
+        ...(tags ? { Tags: tags } : {}),
+        ...(click ? { Click: click } : {}),
+        ...(image ? { Attach: image } : {}),
+        ...(SITE_URL ? { Actions: `view, Ver no Garimpo, ${SITE_URL}` } : {}),
+      },
+    });
+  } catch (e) {
+    log('ntfy', e.message);
+  }
+}
+
+// Push para o celular (app ntfy). Tópicos: <base> e <base>-<categoria> para 50%+,
+// <base>-radar para posts de cupom em hardware, <base>-cupons para cupons de loja.
+async function notify(newDeals, newRadar, newCoupons) {
   if (!NTFY_TOPIC) return;
   const best = newDeals.filter((d) => d.discount >= NTFY_MIN).sort((a, b) => b.discount - a.discount).slice(0, 15);
   for (const d of best) {
-    const prio = d.discount >= 80 ? 5 : d.discount >= 70 ? 4 : 3;
-    const body = `${d.discount}% OFF • R$ ${d.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (era R$ ${d.oldPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})\n${STORES[d.store]}${d.coupon ? ` • cupom ${d.coupon}` : ''}`;
-    for (const topic of [NTFY_TOPIC, `${NTFY_TOPIC}-${d.category}`]) {
-      try {
-        await fetch(`https://ntfy.sh/${topic}`, {
-          method: 'POST',
-          body,
-          headers: {
-            Title: d.title.slice(0, 120).replace(/[^\x20-\x7EÀ-ÿ]/g, ''),
-            Priority: String(prio),
-            Tags: `${d.category},${d.store},d${Math.floor(d.discount / 10) * 10}`,
-            Click: d.url,
-            ...(d.image ? { Attach: d.image } : {}),
-            ...(SITE_URL ? { Actions: `view, Ver no Garimpo, ${SITE_URL}` } : {}),
-          },
-        });
-      } catch (e) {
-        log('ntfy', e.message);
-      }
+    const msg = {
+      title: d.title,
+      body: `${d.discount}% OFF • R$ ${money(d.price)} (era R$ ${money(d.oldPrice)})\n${STORES[d.store]}${d.coupon ? ` • cupom ${d.coupon}` : ''}`,
+      prio: d.discount >= 80 ? 5 : d.discount >= 70 ? 4 : 3,
+      tags: `${d.category},${d.store},d${Math.floor(d.discount / 10) * 10}`,
+      click: d.url,
+      image: d.image,
+    };
+    await ntfy(NTFY_TOPIC, msg);
+    await ntfy(`${NTFY_TOPIC}-${d.category}`, msg);
+  }
+  for (const d of newRadar.slice(0, 15)) {
+    await ntfy(`${NTFY_TOPIC}-radar`, {
+      title: d.title,
+      body: `R$ ${money(d.price)}${d.coupon ? ` com cupom ${d.coupon}` : ''} • ${STORES[d.store]}${d.via ? ` • ${d.via}` : ''}`,
+      tags: `${d.category},${d.store},radar`,
+      click: d.url,
+      image: d.image,
+    });
+  }
+  for (const c of newCoupons.slice(0, 10)) {
+    await ntfy(`${NTFY_TOPIC}-cupons`, { title: `Cupom ${STORES[c.store]}: ${c.code}`, body: c.title || c.discount || '', tags: `ticket,${c.store}`, click: c.url });
+  }
+  const n = best.length + Math.min(15, newRadar.length) + Math.min(10, newCoupons.length);
+  if (n) log(`ntfy: ${n} notificações enviadas`);
+}
+
+function dedupe(list) {
+  const byKey = new Map();
+  for (const d of list) {
+    const s = d.specs || {};
+    const model =
+      d.category === 'cpu' && s.modelo ? s.modelo
+      : d.category === 'gpu' && s.chip ? `${d.brand}|${s.chip}|${s.vram}|${strip(d.title).replace(/[^a-z0-9 ]/g, '').split(' ').slice(0, 8).join(' ')}`
+      : strip(d.title).slice(0, 60);
+    const key = `${d.store}|${d.category}|${model}|${Math.round(d.price / 30)}`;
+    const ex = byKey.get(key);
+    // mantém o mais barato; em empate, o que tem cupom
+    if (!ex || d.price < ex.price || (d.price === ex.price && d.coupon && !ex.coupon)) {
+      if (ex) d.firstSeen = ex.firstSeen < d.firstSeen ? ex.firstSeen : d.firstSeen;
+      byKey.set(key, d);
     }
   }
-  if (best.length) log(`ntfy: ${best.length} notificações enviadas`);
+  return [...byKey.values()];
 }
 
 async function main() {
@@ -437,7 +809,7 @@ async function main() {
     results.kabum = { deals: [], ok: false };
   }
   buildRefs();
-  const sources = { promobit, amazon, patoloco };
+  const sources = { promobit, telegram, amazon, patoloco, ...(process.env.SKIP_BROWSER ? {} : { pichau, terabyte }) };
   await Promise.all(
     Object.entries(sources).map(async ([k, fn]) => {
       try {
@@ -449,7 +821,8 @@ async function main() {
     })
   );
 
-  const prevById = new Map((prev.deals || []).map((d) => [d.id, d]));
+  const prevAll = [...(prev.deals || []), ...(prev.radar || [])];
+  const prevById = new Map(prevAll.map((d) => [d.id, d]));
   const current = new Map();
   for (const r of Object.values(results)) {
     for (const d of r.deals) {
@@ -458,42 +831,56 @@ async function main() {
     }
   }
   // fontes diretas que funcionaram nesta rodada são "autoridade": se o item sumiu, saiu de promoção
-  const directOk = new Set(Object.entries({ kabum: 'kb-', amazon: 'az-', patoloco: 'pl-' }).filter(([k]) => results[k]?.ok).map(([, p]) => p));
+  const directOk = new Set(
+    Object.entries({ kabum: 'kb-', amazon: 'az-', patoloco: 'pl-', pichau: 'pc-', terabyte: 'tb-' })
+      .filter(([k]) => results[k]?.ok)
+      .map(([, p]) => p)
+  );
   const cutoff = Date.now() - KEEP_HOURS * 3600e3;
-  for (const d of prev.deals || []) {
+  const radarCutoff = Date.now() - RADAR_HOURS * 3600e3;
+  for (const d of prevAll) {
     if (current.has(d.id)) continue;
-    const prefix = d.id.slice(0, 3);
-    if (directOk.has(prefix)) continue;
+    if (directOk.has(d.id.slice(0, 3))) continue;
     if (new Date(d.lastSeen).getTime() < cutoff) continue;
     current.set(d.id, d);
   }
+  const all = [...current.values()];
+  const deals = dedupe(all.filter((d) => !d.radar)).sort((a, b) => b.discount - a.discount);
+  const radar = dedupe(all.filter((d) => d.radar && new Date(d.postedAt || d.firstSeen).getTime() >= radarCutoff)).sort((a, b) =>
+    (b.postedAt || b.firstSeen).localeCompare(a.postedAt || a.firstSeen)
+  );
 
-  // dedup: mesmo produto/preço em fontes diferentes
-  const byKey = new Map();
-  for (const d of current.values()) {
-    const s = d.specs || {};
-    const model =
-      d.category === 'cpu' && s.modelo ? s.modelo
-      : d.category === 'gpu' && s.chip ? `${d.brand}|${s.chip}|${s.vram}|${strip(d.title).replace(/[^a-z0-9 ]/g, '').split(' ').slice(0, 8).join(' ')}`
-      : strip(d.title).slice(0, 60);
-    const key = `${d.store}|${d.category}|${model}|${Math.round(d.price / 30)}`;
-    const ex = byKey.get(key);
-    // mantém o mais barato; em empate, o que tem cupom e o mais recente
-    if (!ex || d.price < ex.price || (d.price === ex.price && d.coupon && !ex.coupon)) {
-      if (ex) d.firstSeen = ex.firstSeen < d.firstSeen ? ex.firstSeen : d.firstSeen;
-      byKey.set(key, d);
-    }
-  }
-  const deals = [...byKey.values()].sort((a, b) => b.discount - a.discount);
+  // cupons: os desta rodada + os anteriores ainda recentes
+  const couponCut = Date.now() - COUPON_HOURS * 3600e3;
+  for (const c of prev.coupons || []) if (!COUPONS.has(c.id)) COUPONS.set(c.id, c);
+  const prevCoupons = new Set((prev.coupons || []).map((c) => c.id));
+  const coupons = [...COUPONS.values()]
+    .map((c) => ({ ...c, firstSeen: (prev.coupons || []).find((p) => p.id === c.id)?.firstSeen || c.firstSeen || now }))
+    .filter((c) => new Date(c.postedAt || c.firstSeen).getTime() >= couponCut)
+    .sort((a, b) => (b.postedAt || b.firstSeen).localeCompare(a.postedAt || a.firstSeen));
 
   const newDeals = deals.filter((d) => !prevById.has(d.id));
-  await notify(newDeals);
+  const newRadar = radar.filter((d) => !prevById.has(d.id));
+  const newCoupons = prev.updatedAt ? coupons.filter((c) => !prevCoupons.has(c.id)) : [];
+  await notify(newDeals, prev.updatedAt ? newRadar : [], newCoupons);
 
   const status = Object.fromEntries(Object.entries(results).map(([k, r]) => [k, { ok: r.ok, count: r.deals.length }]));
-  const payload = { updatedAt: now, minDiscount: MIN_DISCOUNT, ntfyTopic: NTFY_TOPIC || null, ntfyMin: NTFY_MIN, sources: status, stores: STORES, count: deals.length, deals };
+  const payload = {
+    updatedAt: now,
+    minDiscount: MIN_DISCOUNT,
+    ntfyTopic: NTFY_TOPIC || null,
+    ntfyMin: NTFY_MIN,
+    telegramChannels: TG_CHANNELS,
+    sources: status,
+    stores: STORES,
+    count: deals.length,
+    deals,
+    radar,
+    coupons,
+  };
   await mkdir(new URL('../data/', import.meta.url), { recursive: true });
   await writeFile(OUT, JSON.stringify(payload));
-  log(`total: ${deals.length} ofertas (${newDeals.length} novas)`);
+  log(`total: ${deals.length} ofertas 50%+ (${newDeals.length} novas), ${radar.length} no radar, ${coupons.length} cupons`);
 }
 
 main().catch((e) => {
