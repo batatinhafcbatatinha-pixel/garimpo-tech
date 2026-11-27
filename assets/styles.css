@@ -107,6 +107,9 @@ kbd { font: 500 11px/1 var(--f-mono); color: var(--muted); border: 1px solid var
 .every:hover { border-color: var(--line-2); color: var(--text); }
 .every svg { width: 15px; height: 15px; }
 .every__lbl { font-size: 12.5px; color: var(--muted); }
+.every--f5 { padding: 0 12px 0 10px; font-size: 12.5px; font-weight: 500; color: var(--text-2); user-select: none; }
+.every--f5 input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.every--f5:has(input:checked) { color: var(--text); border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
 .live.is-running i { background: #ffb020; animation: pulse 1s infinite; }
 .live small { color: var(--muted); font-size: 11px; }
 .every select { border: 0; background: none; outline: none; cursor: pointer; font: 500 12.5px/1 var(--f-body); color: var(--text); padding: 0 6px 0 0; }
@@ -414,6 +417,7 @@ input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border-radius
   .btn--bell span { display: none; }
   .every select { max-width: 104px; }
   .every__lbl { display: none; }
+  .every--f5 span { font-size: 11.5px; }
   .btn--bell { width: 40px; padding: 0; }
   .search kbd { display: none; }
   .hero { padding-block: 26px 20px; }

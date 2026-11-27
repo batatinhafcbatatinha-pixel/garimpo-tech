@@ -19,7 +19,14 @@ Dois cliques em **`Abrir Garimpo.bat`**, ou:
 node server.mjs --open     # http://localhost:4322
 ```
 
-Deixe a janela aberta. No topo da página, **"Coletar a cada"** define o intervalo da coleta inteira: desligado, 10 ou 15 min, 30 min, 1, 3, 6, 12 ou 24 h. Cada coleta leva alguns minutos. Quando termina, a página atualiza sozinha e dispara os alertas, sem botão e sem F5. Para coletar na hora, feche e abra o `.bat` de novo.
+Deixe a janela aberta. No topo da página há duas opções:
+
+- **"Coletar a cada"**: o intervalo da coleta inteira (desligado, 10 ou 15 min, 30 min, 1, 3, 6, 12 ou 24 h).
+- **"F5 coleta"**: ligada, apertar F5 (recarregar a página) refaz a coleta inteira. Desligada, o F5 só recarrega a página.
+
+Não precisa esperar a coleta acabar. As ofertas de cada fonte (KaBuM, Telegram, Promobit, Pichau…) aparecem na página assim que aquela fonte termina, e os alertas disparam na hora.
+
+**Expirados:** ofertas e cupons encerrados são apagados, aqui e na versão online. São os que o Promobit deixou de aprovar, os posts do Telegram marcados como "esgotado" ou "encerrado", cupons com aviso "esgotou CÓDIGO" e ofertas relâmpago do KaBuM que passaram do horário. Itens das lojas lidas direto que sumiram da loja também saem.
 
 No seu PC a Pichau e a Terabyte funcionam: o Cloudflare libera o Chrome headless vindo de IP residencial e bloqueia o que vem dos servidores do GitHub. Precisa do Node 20+ e do Chrome ou Edge instalados. Os dados e o intervalo ficam em `data/local/`, fora do git.
 
@@ -44,7 +51,7 @@ scraper/scrape.mjs → data/deals.json
   └─ Telegram       prévia pública dos canais (t.me/s/<canal>): Mercado Livre, Shopee, AliExpress…
 ```
 
-Canais padrão: `pcdofafapromo`, `ofertasbenevides`, `ofertasdecomputador`, `EconoMister`, `LinksBrazil`. Para trocar, use `TELEGRAM_CHANNELS=canal1,canal2` (variável de ambiente ou variável do repositório).
+Canais padrão: `pcdofafapromo`, `ofertasbenevides`, `ofertasdecomputador`, `EconoMister`, `LinksBrazil`, `gamerdasofertas`, `linguicapromocoes`. Para trocar, use `TELEGRAM_CHANNELS=canal1,canal2` (variável de ambiente ou variável do repositório).
 
 Filtros aplicados em todas as fontes: só produtos novos (descarta usado, recondicionado e open box), só informática e só marcas da lista boa de cada categoria. Duex, Positivo, Multilaser, Vaio/Compaq BR, Afox, Goline, BRX, Redragon e similares são bloqueadas (`scraper/classify.mjs`).
 

@@ -802,6 +802,25 @@ function paintCollector() {
     up.title = LOCAL.lastError ? `Última coleta falhou: ${LOCAL.lastError}` : 'Última atualização dos dados';
   }
   $('#every').value = String(LOCAL.every);
+  $('#f5').checked = !!LOCAL.f5;
+}
+
+// Recarrega os dados que o servidor local já tem (parciais ou finais) e mostra na hora.
+async function refreshFromServer({ final } = {}) {
+  try {
+    await load();
+    renderStats();
+    update();
+    if (final) toast(`Coleta concluída: ${ALL.length} ofertas 50%+, ${RADAR.length} no radar, ${COUPONS.length} cupons`);
+    await checkAlerts();
+  } catch {}
+}
+
+async function saveLocalSettings(patch) {
+  const r = await fetch('api/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) });
+  if (!r.ok) throw new Error(r.status);
+  LOCAL = await r.json();
+  paintCollector();
 }
 
 async function connectLocal() {
@@ -813,29 +832,37 @@ async function connectLocal() {
     return false;
   }
   $('#everyBox').hidden = false;
+  $('#f5Box').hidden = false;
   paintCollector();
   $('#every').addEventListener('change', async (e) => {
     const every = +e.target.value;
-    const r = await fetch('api/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ every }) });
-    if (r.ok) {
-      LOCAL = await r.json();
-      paintCollector();
-      toast(every ? `Coletando ${e.target.selectedOptions[0].text}` : 'Coleta automática desligada');
-    } else toast('Não consegui salvar o intervalo');
+    try {
+      await saveLocalSettings({ every });
+      toast(every ? `Coleta completa ${e.target.selectedOptions[0].text}` : 'Coleta automática desligada');
+    } catch {
+      toast('Não consegui salvar o intervalo');
+    }
+  });
+  $('#f5').addEventListener('change', async (e) => {
+    try {
+      await saveLocalSettings({ f5: e.target.checked });
+      toast(e.target.checked ? 'F5 agora refaz a coleta inteira' : 'F5 só recarrega a página');
+    } catch {
+      toast('Não consegui salvar a opção');
+    }
   });
   const es = new EventSource('api/events');
   es.addEventListener('status', (ev) => { LOCAL = JSON.parse(ev.data); paintCollector(); });
   es.addEventListener('progress', (ev) => { if (LOCAL) { LOCAL.progress = JSON.parse(ev.data).progress; paintCollector(); } });
-  // coleta terminou: mostra na hora
-  es.addEventListener('updated', async () => {
-    try {
-      await load();
-      renderStats();
-      update();
-      toast(`Coleta concluída: ${ALL.length} ofertas 50%+, ${RADAR.length} no radar`);
-      await checkAlerts();
-    } catch {}
-  });
+  // uma fonte terminou: o que ela trouxe aparece na hora, sem esperar o resto
+  es.addEventListener('partial', () => refreshFromServer());
+  // coleta inteira terminou
+  es.addEventListener('updated', () => refreshFromServer({ final: true }));
+  // F5 com a opção ligada: refaz a coleta inteira
+  const nav = performance.getEntriesByType('navigation')[0];
+  if (LOCAL.f5 && nav?.type === 'reload' && !LOCAL.running) {
+    fetch('api/collect', { method: 'POST' }).then(() => toast('F5: coletando tudo de novo…')).catch(() => {});
+  }
   return true;
 }
 

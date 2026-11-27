@@ -6,7 +6,7 @@
 //   radar   — posts de cupom em hardware sem como comprovar os 50% (últimas RADAR_HOURS)
 //   coupons — cupons gerais de loja (ex.: "R$ 250 OFF acima de R$ 999")
 
-import { writeFile, readFile, mkdir } from 'node:fs/promises';
+import { writeFile, readFile, mkdir, rename } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -139,6 +139,7 @@ function makeDeal(raw) {
     ...(radar ? { radar: true } : {}),
     ...(raw.via ? { via: raw.via } : {}),
     ...(raw.postedAt ? { postedAt: raw.postedAt } : {}),
+    ...(raw.expiresAt ? { expiresAt: raw.expiresAt } : {}),
     ref,
     id: raw.id,
     store: raw.store,
@@ -189,8 +190,20 @@ function nextData(html) {
   return m ? JSON.parse(m[1]) : null;
 }
 
+// ------------------------------------------------------------------ expirados
+// Ofertas e cupons que a fonte marcou como encerrados nesta rodada: saem do site
+// mesmo que tenham sido vistos antes.
+const EXPIRED_IDS = new Set(); // ids de ofertas
+const EXPIRED_CODES = new Set(); // códigos de cupom esgotados
+const EXPIRED_WORDS = /\b(esgotad[oa]s?|esgotou|encerrad[oa]s?|encerrou|expirad[oa]s?|expirou|acabou|finalizad[oa]|indispon[ií]vel)\b/i;
+const NOT_A_CODE = /^(ESGOTOU|ESGOTADO|ESGOTADA|ENCERRADO|ENCERRADA|EXPIRADO|ACABOU|CUPOM|CUPONS|OFERTA|PROMO|GALERA|LINK|BLACK|FRIDAY)$/;
+
 function fromPromobitOffer(o) {
-  if (!o || o.offerStatusName && !/APPROVED/i.test(o.offerStatusName)) return null;
+  if (!o) return null;
+  if (o.offerStatusName && !/APPROVED/i.test(o.offerStatusName)) {
+    EXPIRED_IDS.add(`pb-${o.offerId}`);
+    return null;
+  }
   const store = storeKey(o.storeName, o.storeDomain);
   if (!store) return null;
   const price = +o.offerPrice;
@@ -245,7 +258,12 @@ async function promobit() {
   const take = (pp) => {
     for (const c of [pp?.serverCoupons, pp?.couponsByStore].flat().filter(Boolean)) {
       const store = storeKey(c.storeName, c.storeDomain);
-      if (!store || !c.couponCode || c.couponStatusName && !/APPROVED/i.test(c.couponStatusName)) continue;
+      if (!store || !c.couponCode) continue;
+      const until = c.couponUntil ? Date.parse(String(c.couponUntil).replace(/([+-]\d{2})(\d{2})$/, '$1:$2')) : NaN;
+      if ((c.couponStatusName && !/APPROVED/i.test(c.couponStatusName)) || until < Date.now()) {
+        EXPIRED_CODES.add(String(c.couponCode).trim().toUpperCase());
+        continue;
+      }
       addCoupon({
         id: `pbc-${c.couponId}`,
         store,
@@ -314,10 +332,11 @@ async function kabum() {
           seen.add(it.id);
           if (!a.is_marketplace) addRefSample(a.title, a.menu, Math.max(+a.price_with_discount || 0, +a.old_price || 0));
           // Preço "de": o regular à vista (ou old_price, quando a loja informa). Preço "por": o da oferta relâmpago, à vista.
-          let price, oldPrice;
+          let price, oldPrice, expiresAt = null;
           if (a.offer && a.offer.price_with_discount) {
             price = +a.offer.price_with_discount;
             oldPrice = Math.max(+a.price_with_discount || 0, +a.old_price || 0);
+            if (a.offer.ends_at) expiresAt = new Date(a.offer.ends_at * 1000).toISOString();
           } else {
             price = +(a.price_with_discount || a.price);
             oldPrice = +(a.old_price || 0);
@@ -333,6 +352,7 @@ async function kabum() {
             url: `https://www.kabum.com.br/produto/${it.id}/${a.product_link || ''}`,
             image: (a.images && a.images[0]) || a.photos?.g?.[0] || null,
             source: 'KaBuM!',
+            expiresAt,
           });
           if (d) out.push(d);
         }
@@ -463,7 +483,7 @@ function addCoupon(c) {
 // ------------------------------------------------------------------ Telegram (canais públicos de promoção)
 // t.me/s/<canal> é a prévia pública do canal: HTML simples, sem login. É de onde vêm os posts do tipo
 // "Processador AMD Ryzen 7 5700X - R$895 - Cupom BAIXOU - meli.la/...".
-const TG_CHANNELS = (process.env.TELEGRAM_CHANNELS || 'pcdofafapromo,ofertasbenevides,ofertasdecomputador,EconoMister,LinksBrazil')
+const TG_CHANNELS = (process.env.TELEGRAM_CHANNELS || 'pcdofafapromo,ofertasbenevides,ofertasdecomputador,EconoMister,LinksBrazil,gamerdasofertas,linguicapromocoes')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
@@ -479,7 +499,7 @@ const tgText = (html) =>
 // códigos de cupom são sempre em MAIÚSCULAS nos posts; a palavra "cupom" pode vir de qualquer jeito
 const COUPON_RE = /[Cc][Uu][Pp][Oo][MmNn][Ss]?\s*:?\s*([A-Z0-9][A-Z0-9_-]{3,30})\b(?:\s*\+\s*([A-Z0-9][A-Z0-9_-]{3,30})\b)?/;
 const NOT_CODE = /^(HTTPS?|DESTA|DESSA|DESCONTO|LOJA|APP|NO|NA|PARA|VALIDO|ABAIXO|ACIMA|EXCLUSIVO|AQUI|LINK|OFF)$/;
-const SKIP_LINK = /t\.me\/|telegram|nerdofertas|ofertou\.ai|promoavisa|whatsapp|instagram|bit\.ly\/grupo/i;
+const SKIP_LINK = /t\.me\/|telegram|nerdofertas|ofertou\.ai|promoavisa|whatsapp|instagram|bit\.ly\/grupo|linktr\.ee|tr\.ee\/|economisterpromocoes|x\.com\/|twitter\.com/i;
 
 function parseTelegramPost(text, meta) {
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -491,7 +511,18 @@ function parseTelegramPost(text, meta) {
   const urls = [...text.matchAll(/https?:\/\/[^\s<>"']+/g)].map((m) => m[0]).filter((u) => !SKIP_LINK.test(u));
   const url = urls[0];
   const store = (url && storeFromUrl(url)) || storeKey(head);
-  if (/esgot|encerrad|acabou/i.test(text.slice(0, 120))) return;
+  // Post (ou edição de post) dizendo que esgotou: a oferta sai, e os cupons citados também.
+  if (EXPIRED_WORDS.test(text)) {
+    EXPIRED_IDS.add(`tg-${meta.channel}-${meta.postId}`);
+    // aviso curto ("Esgotou MAPQHFAPEIC") = o cupom acabou; post de produto esgotado não derruba o cupom da loja
+    const isNotice = !/R\$\s*\d/.test(text) || text.length < 160;
+    if (isNotice) {
+      for (const m of text.matchAll(/\b[A-Z0-9][A-Z0-9_-]{4,24}\b/g)) {
+        if (!NOT_A_CODE.test(m[0]) && !/^\d+$/.test(m[0])) EXPIRED_CODES.add(m[0]);
+      }
+    }
+    return;
+  }
 
   // Post de cupom de loja: "Novo Cupom Mercado Livre — R$250 OFF EM R$ 999: ZB9MELI"
   if (/^(novo )?cupo[mn]s?\b|cupo[mn]s? (de )?(desconto )?(mercado livre|amazon|shopee|magalu|kabum|pichau|terabyte|aliexpress)/i.test(head) && store) {
@@ -502,17 +533,26 @@ function parseTelegramPost(text, meta) {
     return;
   }
 
-  // Post de produto
-  const pm = /R\$\s*([\d.]+(?:,\d{2})?)/.exec(text);
+  // Post de produto. Formatos aceitos:
+  //   "Processador X ... R$ 845 ... Cupom: ZB9MELI"               (preço com R$)
+  //   "CHAMADA EM MAIÚSCULAS / Monitor X / de 749,00 por 399,05"  (@gamerdasofertas)
+  const NUM = '([\\d.]+(?:,\\d{2})?)';
+  const pm = new RegExp(`\\bpor\\s*:?\\s*(?:R\\$\\s*)?${NUM}`, 'i').exec(text) || new RegExp(`R\\$\\s*${NUM}`).exec(text);
   if (!pm || !store || !url) return;
   const price = brl(pm[1].includes(',') ? pm[1] : `${pm[1]},00`);
+  // título: a primeira das linhas iniciais que parece produto (a 1ª pode ser só uma chamada)
+  const title =
+    lines
+      .slice(0, 5)
+      .map((l) => l.replace(/^[^\p{L}\p{N}]+/u, '').replace(/\s*[-–|]\s*(por\s*)?R\$\s*[\d.,]+.*$/i, '').trim())
+      .find((l) => l.length > 12 && detectCategory(l)) || head;
   const cm = COUPON_RE.exec(text);
   const coupon = cm ? [cm[1], cm[2]].filter((c) => c && !NOT_CODE.test(c)).join(' + ') || null : null;
-  const om = /(?:de|era)\s*:?\s*R\$\s*([\d.]+(?:,\d{2})?)\s*(?:por|→|->)/i.exec(text);
+  const om = new RegExp(`\\b(?:de|era)\\s*:?\\s*(?:R\\$\\s*)?${NUM}\\s*(?:por|→|->)`, 'i').exec(text);
   return makeDeal({
     id: `tg-${meta.channel}-${meta.postId}`,
     store,
-    title: head,
+    title,
     price,
     oldPrice: om ? brl(om[1].includes(',') ? om[1] : `${om[1]},00`) : 0,
     coupon,
@@ -800,30 +840,22 @@ function dedupe(list) {
   return [...byKey.values()];
 }
 
-async function main() {
-  const prev = await loadPrevious();
-  const now = new Date().toISOString();
-  const results = {};
-  // KaBuM primeiro: o catálogo dele alimenta os preços de referência usados nos posts de cupom
-  try {
-    results.kabum = await kabum();
-  } catch (e) {
-    log('kabum falhou', e.message);
-    results.kabum = { deals: [], ok: false };
-  }
-  buildRefs();
-  const sources = { promobit, telegram, amazon, patoloco, ...(process.env.SKIP_BROWSER ? {} : { pichau, terabyte }) };
-  await Promise.all(
-    Object.entries(sources).map(async ([k, fn]) => {
-      try {
-        results[k] = await fn();
-      } catch (e) {
-        log(k, 'falhou', e.message);
-        results[k] = { deals: [], ok: false };
-      }
-    })
-  );
+// PARTIAL=1 (versão local): grava o resultado a cada fonte concluída e imprime "@@partial",
+// para a página mostrar as ofertas na hora. Sem PARTIAL (GitHub), grava uma vez só no fim.
+const PARTIAL = !!process.env.PARTIAL;
+const DIRECT = { kabum: 'kb-', amazon: 'az-', patoloco: 'pl-', pichau: 'pc-', terabyte: 'tb-' };
 
+function isExpired(d, nowMs) {
+  if (EXPIRED_IDS.has(d.id)) return true;
+  if (d.expiresAt && Date.parse(d.expiresAt) < nowMs) return true;
+  // oferta que dependia de um cupom que esgotou
+  if (d.coupon && !d.coupon.includes('+') && EXPIRED_CODES.has(d.coupon.toUpperCase())) return true;
+  return false;
+}
+
+// Junta o que já foi coletado nesta rodada com o anterior e aplica as regras de validade.
+function build(prev, results, now) {
+  const nowMs = Date.parse(now);
   const prevAll = [...(prev.deals || []), ...(prev.radar || [])];
   const prevById = new Map(prevAll.map((d) => [d.id, d]));
   const current = new Map();
@@ -833,57 +865,117 @@ async function main() {
       current.set(d.id, { ...d, firstSeen: p?.firstSeen || now, lastSeen: now });
     }
   }
-  // fontes diretas que funcionaram nesta rodada são "autoridade": se o item sumiu, saiu de promoção
-  const directOk = new Set(
-    Object.entries({ kabum: 'kb-', amazon: 'az-', patoloco: 'pl-', pichau: 'pc-', terabyte: 'tb-' })
-      .filter(([k]) => results[k]?.ok)
-      .map(([, p]) => p)
-  );
-  const cutoff = Date.now() - KEEP_HOURS * 3600e3;
-  const radarCutoff = Date.now() - RADAR_HOURS * 3600e3;
+  // lojas lidas direto que funcionaram nesta rodada: se o item sumiu, saiu de promoção
+  const directOk = new Set(Object.entries(DIRECT).filter(([k]) => results[k]?.ok).map(([, p]) => p));
+  const cutoff = nowMs - KEEP_HOURS * 3600e3;
   for (const d of prevAll) {
     if (current.has(d.id)) continue;
     if (directOk.has(d.id.slice(0, 3))) continue;
-    if (new Date(d.lastSeen).getTime() < cutoff) continue;
+    if (Date.parse(d.lastSeen) < cutoff) continue;
     current.set(d.id, d);
   }
-  const all = [...current.values()];
+  const all = [...current.values()].filter((d) => !isExpired(d, nowMs));
+  const radarCutoff = nowMs - RADAR_HOURS * 3600e3;
   const deals = dedupe(all.filter((d) => !d.radar)).sort((a, b) => b.discount - a.discount);
-  const radar = dedupe(all.filter((d) => d.radar && new Date(d.postedAt || d.firstSeen).getTime() >= radarCutoff)).sort((a, b) =>
+  const radar = dedupe(all.filter((d) => d.radar && Date.parse(d.postedAt || d.firstSeen) >= radarCutoff)).sort((a, b) =>
     (b.postedAt || b.firstSeen).localeCompare(a.postedAt || a.firstSeen)
   );
 
-  // cupons: os desta rodada + os anteriores ainda recentes
-  const couponCut = Date.now() - COUPON_HOURS * 3600e3;
-  for (const c of prev.coupons || []) if (!COUPONS.has(c.id)) COUPONS.set(c.id, c);
-  const prevCoupons = new Set((prev.coupons || []).map((c) => c.id));
-  const coupons = [...COUPONS.values()]
-    .map((c) => ({ ...c, firstSeen: (prev.coupons || []).find((p) => p.id === c.id)?.firstSeen || c.firstSeen || now }))
-    .filter((c) => new Date(c.postedAt || c.firstSeen).getTime() >= couponCut)
+  // cupons: os desta rodada + os anteriores ainda válidos
+  const couponCut = nowMs - COUPON_HOURS * 3600e3;
+  const prevCoupons = new Map((prev.coupons || []).map((c) => [c.id, c]));
+  const merged = new Map(prevCoupons);
+  for (const [k, c] of COUPONS) merged.set(k, { ...c, firstSeen: prevCoupons.get(k)?.firstSeen || c.firstSeen || now });
+  const coupons = [...merged.values()]
+    .filter((c) => !EXPIRED_CODES.has(c.code))
+    .filter((c) => Date.parse(c.postedAt || c.firstSeen || now) >= couponCut)
     .sort((a, b) => (b.postedAt || b.firstSeen).localeCompare(a.postedAt || a.firstSeen));
 
+  const status = Object.fromEntries(Object.entries(results).map(([k, r]) => [k, { ok: r.ok, count: r.deals.length }]));
+  return {
+    prevById,
+    prevCoupons,
+    payload: {
+      updatedAt: now,
+      minDiscount: MIN_DISCOUNT,
+      ntfyTopic: NTFY_TOPIC || null,
+      ntfyMin: NTFY_MIN,
+      telegramChannels: TG_CHANNELS,
+      sources: status,
+      stores: STORES,
+      count: deals.length,
+      deals,
+      radar,
+      coupons,
+    },
+  };
+}
+
+let writing = Promise.resolve();
+function save(payload) {
+  // grava num temporário e troca de uma vez: quem estiver lendo nunca pega o arquivo pela metade
+  writing = writing.then(async () => {
+    const out = fileURLToPath(OUT);
+    await mkdir(dirname(out), { recursive: true });
+    const tmp = `${out}.${process.pid}.tmp`;
+    await writeFile(tmp, JSON.stringify(payload));
+    for (let i = 0; ; i++) {
+      try {
+        await rename(tmp, out);
+        break;
+      } catch (e) {
+        if (i >= 9) throw e; // Windows: arquivo aberto por um leitor; tenta de novo
+        await sleep(100);
+      }
+    }
+  });
+  return writing;
+}
+
+async function main() {
+  const prev = await loadPrevious();
+  const now = new Date().toISOString();
+  const results = {};
+  const partial = async () => {
+    if (!PARTIAL) return;
+    const { payload } = build(prev, results, new Date().toISOString());
+    payload.partial = true;
+    await save(payload);
+    console.log('@@partial');
+  };
+  // KaBuM primeiro: o catálogo dele alimenta os preços de referência usados nos posts de cupom
+  try {
+    results.kabum = await kabum();
+  } catch (e) {
+    log('kabum falhou', e.message);
+    results.kabum = { deals: [], ok: false };
+  }
+  buildRefs();
+  await partial();
+  const sources = { promobit, telegram, amazon, patoloco, ...(process.env.SKIP_BROWSER ? {} : { pichau, terabyte }) };
+  await Promise.all(
+    Object.entries(sources).map(async ([k, fn]) => {
+      try {
+        results[k] = await fn();
+      } catch (e) {
+        log(k, 'falhou', e.message);
+        results[k] = { deals: [], ok: false };
+      }
+      await partial();
+    })
+  );
+
+  const { payload, prevById, prevCoupons } = build(prev, results, now);
+  const { deals, radar, coupons } = payload;
   const newDeals = deals.filter((d) => !prevById.has(d.id));
   const newRadar = radar.filter((d) => !prevById.has(d.id));
   const newCoupons = prev.updatedAt ? coupons.filter((c) => !prevCoupons.has(c.id)) : [];
   await notify(newDeals, prev.updatedAt ? newRadar : [], newCoupons);
-
-  const status = Object.fromEntries(Object.entries(results).map(([k, r]) => [k, { ok: r.ok, count: r.deals.length }]));
-  const payload = {
-    updatedAt: now,
-    minDiscount: MIN_DISCOUNT,
-    ntfyTopic: NTFY_TOPIC || null,
-    ntfyMin: NTFY_MIN,
-    telegramChannels: TG_CHANNELS,
-    sources: status,
-    stores: STORES,
-    count: deals.length,
-    deals,
-    radar,
-    coupons,
-  };
-  await mkdir(dirname(fileURLToPath(OUT)), { recursive: true });
-  await writeFile(OUT, JSON.stringify(payload));
-  log(`total: ${deals.length} ofertas 50%+ (${newDeals.length} novas), ${radar.length} no radar, ${coupons.length} cupons`);
+  await save(payload);
+  log(
+    `total: ${deals.length} ofertas 50%+ (${newDeals.length} novas), ${radar.length} no radar, ${coupons.length} cupons` +
+      ` · expirados nesta rodada: ${EXPIRED_IDS.size} ofertas, ${EXPIRED_CODES.size} códigos`
+  );
 }
 
 main().catch((e) => {

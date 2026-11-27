@@ -1,5 +1,7 @@
 // Garimpo local: serve o site e roda a coleta no intervalo escolhido na página.
-// Quando a coleta termina, a página é avisada na hora (Server-Sent Events) e mostra as ofertas novas.
+// A cada fonte concluída a página é avisada (Server-Sent Events) e já mostra o que chegou,
+// sem esperar a coleta inteira. Com a opção "F5 refaz a coleta" ligada, recarregar a página
+// dispara uma coleta completa.
 //
 //   node server.mjs            → http://localhost:4322
 //   node server.mjs --open     → idem, abrindo o navegador
@@ -31,13 +33,13 @@ const TYPES = {
   '.webmanifest': 'application/manifest+json',
 };
 
-let settings = { every: 30, ntfyTopic: '' };
+let settings = { every: 30, f5: false, ntfyTopic: '' };
 const state = { running: false, startedAt: null, lastEnd: null, lastOk: null, lastError: null, nextAt: null, progress: '' };
 const clients = new Set();
 let timer = null;
 
 const log = (...a) => console.log(new Date().toLocaleTimeString('pt-BR'), ...a);
-const status = () => ({ ...state, every: settings.every, intervals: INTERVALS });
+const status = () => ({ ...state, every: settings.every, f5: !!settings.f5, intervals: INTERVALS });
 
 function send(event, data) {
   const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -69,12 +71,17 @@ function collect() {
   log('coleta iniciada');
   const child = spawn(process.execPath, [join(ROOT, 'scraper', 'scrape.mjs')], {
     cwd: ROOT,
-    env: { ...process.env, DATA_FILE: DATA, NTFY_TOPIC: settings.ntfyTopic || '', SITE_URL: `http://localhost:${PORT}/` },
+    env: { ...process.env, DATA_FILE: DATA, PARTIAL: '1', NTFY_TOPIC: settings.ntfyTopic || '', SITE_URL: `http://localhost:${PORT}/` },
     windowsHide: true,
   });
   let errTail = '';
   const onLine = (buf) => {
     for (const line of String(buf).split('\n').map((l) => l.trim()).filter(Boolean)) {
+      // uma fonte terminou e o arquivo já tem o que ela trouxe: a página mostra na hora
+      if (line === '@@partial') {
+        send('partial', { at: new Date().toISOString() });
+        continue;
+      }
       process.stdout.write(`  ${line}\n`);
       // "03:22:43 telegram: 75 itens..." → "telegram: 75 itens..."
       state.progress = line.replace(/^\d\d:\d\d:\d\d\s+/, '').slice(0, 120);
@@ -151,15 +158,28 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // F5 com a opção ligada: refaz a coleta inteira (se já estiver coletando, não começa outra)
+  if (p === '/api/collect' && req.method === 'POST') {
+    const started = !state.running;
+    collect();
+    return json(res, 200, { started, ...status() });
+  }
+
   if (p === '/api/settings' && req.method === 'POST') {
     let body = '';
     for await (const chunk of req) body += chunk;
     try {
       const j = JSON.parse(body || '{}');
-      if (!INTERVALS.includes(+j.every)) return json(res, 400, { error: 'intervalo inválido' });
-      settings.every = +j.every;
+      if ('every' in j) {
+        if (!INTERVALS.includes(+j.every)) return json(res, 400, { error: 'intervalo inválido' });
+        settings.every = +j.every;
+        log(`intervalo de coleta: ${settings.every ? `${settings.every} min` : 'desligado'}`);
+      }
+      if ('f5' in j) {
+        settings.f5 = !!j.f5;
+        log(`F5 refaz a coleta: ${settings.f5 ? 'ligado' : 'desligado'}`);
+      }
       await saveSettings();
-      log(`intervalo de coleta: ${settings.every ? `${settings.every} min` : 'desligado'}`);
       await schedule();
       return json(res, 200, status());
     } catch {
