@@ -91,3 +91,11 @@ test('loadJson com arquivo quebrado ou ausente devolve o padrão; saveJson grava
 });
 
 test('dayOf converte ISO em dia', () => assert.equal(dayOf('2026-11-27T23:00:00.000Z'), '2026-11-27'));
+
+test('histórico com formato errado não derruba nada', () => {
+  const h = { a: {}, b: { days: null } };
+  assert.doesNotThrow(() => prune(h, TODAY));
+  assert.equal(isFull({ x: {} }, 'x', TODAY), false);
+  assert.equal(reference({ [K]: {} }, {}, K, `${TODAY}T10:00:00Z`), null);
+  assert.doesNotThrow(() => recordPrice({ [K]: { title: 't' } }, it(900), TODAY));
+});

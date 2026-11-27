@@ -1139,7 +1139,11 @@ async function main() {
       log('externo falhou', e.message);
     }
   }
-  await saveHistory(results);
+  try {
+    await saveHistory(results);
+  } catch (e) {
+    log('histórico não foi gravado', e.message); // a coleta segue mesmo assim
+  }
   const { payload, prevById, prevCoupons } = build(prev, results, now, hx());
   const { deals, radar, coupons } = payload;
   const newDeals = deals.filter((d) => !prevById.has(d.id));

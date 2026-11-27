@@ -38,19 +38,48 @@ export function entitiesToText(message) {
 
 const DEAD_SESSION = /AUTH_KEY_UNREGISTERED|SESSION_REVOKED|AUTH_KEY_DUPLICATED|USER_DEACTIVATED/;
 
-export function createAccount({ localDir, log = () => {} }) {
+// Percebe quando a sessão morre com o live rodando (ex.: revogada pelo celular em
+// "Dispositivos"): erros que o gramjs reporta (client.onError) e um getMe() periódico.
+export function watchSession(client, onError, { interval = 5 * 60000 } = {}) {
+  let done = false;
+  const fail = (e) => {
+    if (done) return;
+    onError(e);
+  };
+  client.onError = async (e) => {
+    if (DEAD_SESSION.test(e?.message || '')) fail(e);
+  };
+  const t = setInterval(() => {
+    Promise.resolve()
+      .then(() => client.getMe())
+      .catch((e) => {
+        if (DEAD_SESSION.test(e?.message || '')) fail(e);
+      });
+  }, interval);
+  t.unref?.();
+  return () => {
+    done = true;
+    clearInterval(t);
+  };
+}
+
+export function createAccount({ localDir, log = () => {}, lib: injected }) {
+  const getLib = injected ? async () => injected : loadLib;
   const CREDS = join(localDir, 'telegram.json');
   const SESSION = join(localDir, 'telegram-session.txt');
   let client = null;
   let pending = null; // login em andamento: { apiId, apiHash, phone, phoneCodeHash }
+  let unwatch = () => {};
 
   const readCreds = async () => JSON.parse(await readFile(CREDS, 'utf8'));
   const saveSession = async () => {
     await mkdir(localDir, { recursive: true });
     await writeFile(SESSION, client.session.save());
   };
+  // um cliente por vez: o anterior é desligado (senão fica pingando e reconectando para sempre)
   async function newClient(apiId, apiHash, session = '') {
-    const L = await loadLib();
+    await dropClient();
+    const L = await getLib();
     if (!L) throw new Error('gramjs não instalado: rode "npm install" na pasta do Garimpo');
     const c = new L.TelegramClient(new L.StringSession(session), +apiId, apiHash, {
       connectionRetries: 5,
@@ -62,9 +91,18 @@ export function createAccount({ localDir, log = () => {} }) {
     await c.connect();
     return c;
   }
+  async function dropClient() {
+    unwatch();
+    unwatch = () => {};
+    const old = client;
+    client = null;
+    try {
+      await old?.disconnect();
+    } catch {}
+  }
 
   return {
-    available: async () => !!(await loadLib()),
+    available: async () => !!(await getLib()),
     async hasSession() {
       try {
         return !!(await readFile(SESSION, 'utf8')).trim();
@@ -75,14 +113,15 @@ export function createAccount({ localDir, log = () => {} }) {
 
     async startLogin({ apiId, apiHash, phone }) {
       if (!+apiId || !apiHash || !phone) throw new Error('preencha api_id, api_hash e telefone');
-      client = await newClient(apiId, apiHash);
+      const c = await newClient(apiId, apiHash);
+      client = c;
       const { phoneCodeHash } = await client.sendCode({ apiId: +apiId, apiHash }, phone);
       pending = { apiId: +apiId, apiHash, phone, phoneCodeHash };
       return { step: 'code' };
     },
     async submitCode(code) {
       if (!pending) throw new Error('comece pelo telefone');
-      const L = await loadLib();
+      const L = await getLib();
       try {
         await client.invoke(new L.Api.auth.SignIn({ phoneNumber: pending.phone, phoneCodeHash: pending.phoneCodeHash, phoneCode: String(code).trim() }));
       } catch (e) {
@@ -112,9 +151,10 @@ export function createAccount({ localDir, log = () => {} }) {
     async connect({ channels, onPost, onError }) {
       const { apiId, apiHash } = await readCreds();
       const session = (await readFile(SESSION, 'utf8')).trim();
-      const L = await loadLib();
+      const L = await getLib();
       try {
         client = await newClient(apiId, apiHash, session);
+        const c = client;
         const me = await client.getMe();
         const want = new Set(channels.map((c) => c.toLowerCase()));
         const joined = new Set();
@@ -135,27 +175,29 @@ export function createAccount({ localDir, log = () => {} }) {
         };
         client.addEventHandler(handler(false), new L.NewMessage({}));
         client.addEventHandler(handler(true), new L.EditedMessage({}));
-        client._garimpoErr = onError;
+        unwatch = watchSession(c, async (e) => {
+          await dropClient();
+          if (DEAD_SESSION.test(e.message)) await rm(SESSION, { force: true });
+          onError(e);
+        });
         const name = [me.firstName, me.lastName].filter(Boolean).join(' ') || me.username || 'sua conta';
         return { user: name, joined };
       } catch (e) {
+        await dropClient();
         if (DEAD_SESSION.test(e.message)) await rm(SESSION, { force: true });
         throw e;
       }
     },
     async join(channel) {
-      const L = await loadLib();
+      const L = await getLib();
       if (!client) throw new Error('não conectado');
       await client.invoke(new L.Api.channels.JoinChannel({ channel }));
     },
     async disconnect() {
-      try {
-        await client?.disconnect();
-      } catch {}
-      client = null;
+      await dropClient();
     },
     async logout() {
-      const L = await loadLib();
+      const L = await getLib();
       try {
         if (client && L) await client.invoke(new L.Api.auth.LogOut());
       } catch {}

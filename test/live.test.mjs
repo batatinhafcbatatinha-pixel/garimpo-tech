@@ -85,3 +85,14 @@ test('sem gramjs: fica no t.me/s e o login explica o motivo', async () => {
   assert.match(live.status().error, /npm install/);
   live.stop();
 });
+
+test('post novo lido pelo live avisa a página (onDeals)', async () => {
+  const d = dir();
+  let html = page;
+  let calls = 0;
+  const live = mk(d, { fetchText: async () => html, onDeals: () => calls++ });
+  await live.pollOnce();
+  html = page.replace('data-post="pcdofafapromo/73603"', 'data-post="pcdofafapromo/73800"');
+  await live.pollOnce();
+  assert.equal(calls, 1);
+});

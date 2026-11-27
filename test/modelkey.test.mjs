@@ -36,3 +36,22 @@ test('sem código de modelo → null', () => {
   assert.equal(modelKey({ title: 'Teclado Gamer RGB ABNT2', category: 'teclado', brand: 'Logitech', specs: {} }), null);
   assert.equal(key('Teclado Mecânico Logitech G Pro X'), null);
 });
+
+test('linhas diferentes da mesma GPU não se misturam (Eagle × Windforce)', () => {
+  const a = key('Placa de Vídeo Gigabyte GeForce RTX 4060 Eagle OC 8GB');
+  const b = key('Placa de Vídeo Gigabyte GeForce RTX 4060 Windforce OC 8GB');
+  assert.ok(a && b);
+  assert.notEqual(a, b);
+});
+
+test('placa-mãe com e sem WiFi, e revisão II, são modelos diferentes', () => {
+  assert.notEqual(key('Placa-Mãe ASUS TUF Gaming B650M-Plus WiFi AM5'), key('Placa-Mãe ASUS TUF Gaming B650M-Plus AM5'));
+  assert.notEqual(key('Placa-Mãe ASUS Prime B650M-A II AM5'), key('Placa-Mãe ASUS Prime B650M-A AM5'));
+});
+
+test('placa-mãe: o nome depois do chipset faz parte do modelo (Aorus Elite × DS3H)', () => {
+  const a = key('Placa-Mãe Gigabyte B550M Aorus Elite, AMD AM4, Micro ATX, DDR4');
+  assert.ok(a);
+  assert.notEqual(a, key('Placa-Mãe Gigabyte B550M DS3H, AMD AM4, Micro ATX, DDR4'));
+  assert.equal(a, key('Placa Mãe Gigabyte B550M Aorus Elite AM4 mATX DDR4 Preto'));
+});

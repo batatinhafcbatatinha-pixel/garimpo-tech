@@ -28,7 +28,7 @@ export function nextDelay(failures) {
 const MEM = { expiredIds: EXPIRED_IDS, expiredCodes: EXPIRED_CODES, refs: REFS };
 
 export function createLive({
-  localDir, channels, getTopic = () => '', onChange = () => {}, log = console.log,
+  localDir, channels, getTopic = () => '', onChange = () => {}, onDeals = () => {}, log = console.log,
   fetchText = (u) => get(u, { tries: 1 }), now = () => new Date(), account,
 }) {
   const DATA = join(localDir, 'deals.json');
@@ -92,6 +92,7 @@ export function createLive({
       journal.push({ at: now().toISOString(), deals, expiredIds, expiredCodes, coupons });
       st.lastPostAt = now().toISOString();
       log(`live: ${deals.length} ofertas, ${coupons.length} cupons, ${expiredIds.length + expiredCodes.length} esgotados`);
+      onDeals(); // a página recarrega os dados
       onChange();
     });
   }

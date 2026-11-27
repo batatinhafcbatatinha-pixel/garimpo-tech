@@ -44,6 +44,7 @@ export async function saveJson(path, obj) {
 export function recordPrice(hist, { key, title, category, store, price, coupon }, day) {
   if (!key || !(price > 0)) return;
   const e = (hist[key] ||= { title, category, days: {} });
+  if (!e.days || typeof e.days !== 'object') e.days = {};
   const s = ((e.days[day] ||= {})[store] ||= {});
   const f = coupon ? 'coupon' : 'shelf';
   if (!(s[f] <= price)) s[f] = price;
@@ -52,6 +53,10 @@ export function recordPrice(hist, { key, title, category, store, price, coupon }
 export function prune(hist, today, keepDays = KEEP_DAYS) {
   const cut = addDays(today, -keepDays);
   for (const [k, e] of Object.entries(hist)) {
+    if (!e?.days || typeof e.days !== 'object') {
+      delete hist[k]; // entrada com formato errado: descarta
+      continue;
+    }
     for (const d of Object.keys(e.days)) if (d < cut) delete e.days[d];
     if (!Object.keys(e.days).length) delete hist[k];
   }
@@ -66,7 +71,7 @@ function shelfOfDay(stores) {
 
 export function isFull(hist, key, today) {
   const e = hist[key];
-  if (!e) return false;
+  if (!e?.days) return false;
   const from = addDays(today, -(WINDOW - 1));
   let n = 0;
   for (const [d, stores] of Object.entries(e.days)) if (d >= from && d <= today && shelfOfDay(stores) != null) n++;

@@ -75,13 +75,9 @@ const live = createLive({
   onChange: () => {
     send('live', live.status());
   },
+  // cada leva de posts gravada: a página recarrega os dados (o mesmo evento das fontes da coleta)
+  onDeals: () => send('partial', { at: new Date().toISOString(), live: true }),
 });
-// cada leva de posts gravada: a página recarrega os dados (o mesmo evento das fontes da coleta)
-const handlePosts = live.handlePosts;
-live.handlePosts = async (p) => {
-  await handlePosts(p);
-  send('partial', { at: new Date().toISOString(), live: true });
-};
 
 // ------------------------------------------------------------------ coleta
 function collect() {
