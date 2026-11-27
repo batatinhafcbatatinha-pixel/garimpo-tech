@@ -162,9 +162,9 @@ kbd { font: 500 11px/1 var(--f-mono); color: var(--muted); border: 1px solid var
 .viewnote { margin: -4px 0 16px; padding: 10px 14px; border-radius: 12px; background: var(--surface); border: 1px dashed var(--line-2); color: var(--text-2); font-size: 12.5px; }
 
 /* ============ Categories ============ */
-/* no computador as categorias quebram em linhas (sem barra de rolagem não dá pra arrastar com o mouse);
-   no celular continuam numa linha só, arrastando com o dedo */
-.cats { display: flex; flex-wrap: wrap; gap: 8px; overflow-x: auto; padding-bottom: 18px; scrollbar-width: none; }
+.cats { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 18px; scrollbar-width: none; }
+/* arrastar com o mouse (app.js) */
+.cats.is-drag, .cats.is-drag .cat { cursor: grabbing; user-select: none; }
 .cats::-webkit-scrollbar { display: none; }
 .cat {
   display: inline-flex; align-items: center; gap: 10px; flex: none;
@@ -406,7 +406,6 @@ input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border-radius
 }
 @media (max-width: 640px) {
   .views { gap: 6px; }
-  .cats { flex-wrap: nowrap; }
   .views button { padding: 10px; grid-template-columns: 1fr; }
   .views b { font-size: 13px; }
   .views span { display: none; }
