@@ -12,7 +12,10 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { detectCategory, detectBrand, extractSpecs, isNew, strip, moboSlotsFromSpec } from './classify.mjs';
+import { detectCategory, detectBrand, extractSpecs, isNew, strip, moboSlotsFromSpec, modelKey } from './classify.mjs';
+import { verify, checkRadar, recordPrice, prune, loadJson, saveJson, dayOf } from './history.mjs';
+import { loadState, applyState, captureState } from './state.mjs';
+import { enrichExternal } from './external.mjs';
 
 const MIN_DISCOUNT = +(process.env.MIN_DISCOUNT || 50);
 const KEEP_HOURS = +(process.env.KEEP_HOURS || 72);
@@ -353,6 +356,8 @@ async function kabum() {
             price = +(a.price_with_discount || a.price);
             oldPrice = +(a.old_price || 0);
           }
+          // histórico: todo produto visto conta, não só as ofertas (é o que dá o preço normal)
+          seePrice({ store: 'kabum', title: a.title, menu: a.menu, brandHint: a.manufacturer?.name, price });
           const d = makeDeal({
             id: `kb-${it.id}`,
             store: 'kabum',
@@ -585,6 +590,27 @@ function parseTelegramPost(text, meta) {
   });
 }
 
+// Prévia pública t.me/s/<canal> → posts (texto já convertido por tgText).
+// withEmpty: inclui posts sem texto (só foto), para a paginação por "before" não pular ids.
+function parseTmePage(html, { withEmpty = false } = {}) {
+  const out = [];
+  for (const p of html.split('tgme_widget_message_wrap').slice(1)) {
+    const dp = /data-post="([^"/]+)\/(\d+)"/.exec(p);
+    if (!dp) continue;
+    const body = /tgme_widget_message_text[^>]*>([\s\S]*?)<\/div>/.exec(p)?.[1];
+    if (!body && !withEmpty) continue;
+    const dt = /datetime="([^"]+)"/.exec(p)?.[1];
+    out.push({
+      channel: dp[1],
+      postId: +dp[2],
+      postedAt: dt ? new Date(dt).toISOString() : null,
+      image: /tgme_widget_message_photo_wrap[^>]*background-image:url\('([^']+)'\)/.exec(p)?.[1] || null,
+      text: body ? tgText(body) : '',
+    });
+  }
+  return out;
+}
+
 async function telegram() {
   const out = [];
   let ok = 0;
@@ -595,21 +621,13 @@ async function telegram() {
         try {
           const html = await get(`https://t.me/s/${ch}${before ? `?before=${before}` : ''}`);
           ok++;
-          const posts = html.split('tgme_widget_message_wrap').slice(1);
+          const posts = parseTmePage(html, { withEmpty: true });
           if (!posts.length) break;
           let minId = Infinity;
           for (const p of posts) {
-            const dp = /data-post="([^"/]+)\/(\d+)"/.exec(p);
-            if (!dp) continue;
-            minId = Math.min(minId, +dp[2]);
-            const body = /tgme_widget_message_text[^>]*>([\s\S]*?)<\/div>/.exec(p)?.[1];
-            if (!body) continue;
-            const d = parseTelegramPost(tgText(body), {
-              channel: dp[1],
-              postId: dp[2],
-              postedAt: /datetime="([^"]+)"/.exec(p)?.[1] ? new Date(/datetime="([^"]+)"/.exec(p)[1]).toISOString() : null,
-              image: /tgme_widget_message_photo_wrap[^>]*background-image:url\('([^']+)'\)/.exec(p)?.[1] || null,
-            });
+            minId = Math.min(minId, p.postId);
+            if (!p.text) continue;
+            const d = parseTelegramPost(p.text, p);
             if (d) out.push(d);
           }
           if (!isFinite(minId)) break;
@@ -809,8 +827,8 @@ async function ntfy(topic, { title, body, prio = 3, tags, click, image }) {
 
 // Push para o celular (app ntfy). Tópicos: <base> e <base>-<categoria> para 50%+,
 // <base>-radar para posts de cupom em hardware, <base>-cupons para cupons de loja.
-async function notify(newDeals, newRadar, newCoupons) {
-  if (!NTFY_TOPIC) return;
+async function notify(newDeals, newRadar, newCoupons, topic = NTFY_TOPIC) {
+  if (!topic) return;
   const best = newDeals.filter((d) => d.discount >= NTFY_MIN).sort((a, b) => b.discount - a.discount).slice(0, 15);
   for (const d of best) {
     const msg = {
@@ -821,11 +839,11 @@ async function notify(newDeals, newRadar, newCoupons) {
       click: d.url,
       image: d.image,
     };
-    await ntfy(NTFY_TOPIC, msg);
-    await ntfy(`${NTFY_TOPIC}-${d.category}`, msg);
+    await ntfy(topic, msg);
+    await ntfy(`${topic}-${d.category}`, msg);
   }
   for (const d of newRadar.slice(0, 15)) {
-    await ntfy(`${NTFY_TOPIC}-radar`, {
+    await ntfy(`${topic}-radar`, {
       title: d.title,
       body: `R$ ${money(d.price)}${d.coupon ? ` com cupom ${d.coupon}` : ''} • ${STORES[d.store]}${d.via ? ` • ${d.via}` : ''}`,
       tags: `${d.category},${d.store},radar`,
@@ -834,7 +852,7 @@ async function notify(newDeals, newRadar, newCoupons) {
     });
   }
   for (const c of newCoupons.slice(0, 10)) {
-    await ntfy(`${NTFY_TOPIC}-cupons`, { title: `Cupom ${STORES[c.store]}: ${c.code}`, body: c.title || c.discount || '', tags: `ticket,${c.store}`, click: c.url });
+    await ntfy(`${topic}-cupons`, { title: `Cupom ${STORES[c.store]}: ${c.code}`, body: c.title || c.discount || '', tags: `ticket,${c.store}`, click: c.url });
   }
   const n = best.length + Math.min(15, newRadar.length) + Math.min(10, newCoupons.length);
   if (n) log(`ntfy: ${n} notificações enviadas`);
@@ -924,6 +942,49 @@ async function enrichMobos(results, prev) {
 // PARTIAL=1 (versão local): grava o resultado a cada fonte concluída e imprime "@@partial",
 // para a página mostrar as ofertas na hora. Sem PARTIAL (GitHub), grava uma vez só no fim.
 const PARTIAL = !!process.env.PARTIAL;
+
+// ------------------------------------------------------------------ histórico de preços (só versão local)
+// Versão local: data/local/. GitHub Actions (HISTORY=1): ao lado do deals.json publicado, e a rodada
+// seguinte baixa do site (PREV_URL), como já faz com as ofertas.
+const LOCAL_DIR = process.env.DATA_FILE ? dirname(resolve(process.env.DATA_FILE)) : null;
+const HIST_DIR = LOCAL_DIR || (process.env.HISTORY ? dirname(fileURLToPath(OUT)) : null);
+const HIST_FILE = HIST_DIR && join(HIST_DIR, 'history.json');
+const EXT_FILE = HIST_DIR && join(HIST_DIR, 'external-history.json');
+let HIST = null; // carregado no main() quando há histórico ligado
+let EXT = {};
+const STATE_FILE = LOCAL_DIR && join(LOCAL_DIR, 'state.json');
+const MEM = () => ({ expiredIds: EXPIRED_IDS, expiredCodes: EXPIRED_CODES, refs: REFS });
+function seePrice({ store, title, menu, brandHint, price, coupon = false, category, brand, specs }) {
+  if (!HIST || !(price > 0) || !title) return;
+  category ||= detectCategory(title, menu);
+  if (!category) return;
+  brand ||= detectBrand(category, title, brandHint);
+  if (!brand) return;
+  const key = modelKey({ title, category, brand, specs: specs || extractSpecs(category, title) });
+  if (key) recordPrice(HIST, { key, title, category, store, price, coupon }, dayOf(new Date().toISOString()));
+}
+const siblingUrl = (url, name) => url.replace(/[^/?#]+(?:[?#].*)?$/, name);
+// arquivo local; sem ele (GitHub), o publicado na rodada anterior
+async function loadShared(file, name) {
+  const local = await loadJson(file, null);
+  if (local) return local;
+  if (PREV_URL) {
+    try {
+      return await get(`${siblingUrl(PREV_URL, name)}?t=${Date.now()}`, { json: true });
+    } catch (e) {
+      log(`${name} (url)`, e.message);
+    }
+  }
+  return {};
+}
+async function saveHistory(results) {
+  if (!HIST) return;
+  for (const r of Object.values(results))
+    for (const d of r.deals) seePrice({ store: d.store, title: d.title, price: d.price, coupon: !!d.coupon, category: d.category, brand: d.brand, specs: d.specs });
+  prune(HIST, dayOf(new Date().toISOString()));
+  await saveJson(HIST_FILE, HIST);
+  log(`histórico: ${Object.keys(HIST).length} modelos`);
+}
 const DIRECT = { kabum: 'kb-', amazon: 'az-', patoloco: 'pl-', pichau: 'pc-', terabyte: 'tb-' };
 
 function isExpired(d, nowMs) {
@@ -944,7 +1005,8 @@ function reclassify(d) {
 }
 
 // Junta o que já foi coletado nesta rodada com o anterior e aplica as regras de validade.
-function build(prev, results, now) {
+// opts.hist / opts.ext (versão local): confere o desconto contra o histórico de preços e tira as infladas.
+function build(prev, results, now, { hist, ext } = {}) {
   const nowMs = Date.parse(now);
   const prevAll = [...(prev.deals || []), ...(prev.radar || [])];
   const prevById = new Map(prevAll.map((d) => [d.id, d]));
@@ -966,10 +1028,23 @@ function build(prev, results, now) {
   }
   const all = [...current.values()].filter((d) => !isExpired(d, nowMs));
   const radarCutoff = nowMs - RADAR_HOURS * 3600e3;
-  const deals = dedupe(all.filter((d) => !d.radar)).sort((a, b) => b.discount - a.discount);
-  const radar = dedupe(all.filter((d) => d.radar && Date.parse(d.postedAt || d.firstSeen) >= radarCutoff)).sort((a, b) =>
-    (b.postedAt || b.firstSeen).localeCompare(a.postedAt || a.firstSeen)
-  );
+  let deals = dedupe(all.filter((d) => !d.radar));
+  let removedInflated;
+  if (hist) {
+    const v = verify(deals, hist, ext || {}, MIN_DISCOUNT);
+    deals = v.kept;
+    removedInflated = v.removed;
+  }
+  let radar = dedupe(all.filter((d) => d.radar && Date.parse(d.postedAt || d.firstSeen) >= radarCutoff));
+  if (hist) {
+    // radar com histórico: desconto real conhecido → sobe para a 50%+ ou sai de tudo
+    const r = checkRadar(radar, hist, ext || {}, MIN_DISCOUNT);
+    radar = r.kept;
+    deals = deals.concat(r.promoted);
+    removedInflated += r.removed;
+  }
+  deals.sort((a, b) => b.discount - a.discount);
+  radar.sort((a, b) => (b.postedAt || b.firstSeen).localeCompare(a.postedAt || a.firstSeen));
 
   // cupons: os desta rodada + os anteriores ainda válidos
   const couponCut = nowMs - COUPON_HOURS * 3600e3;
@@ -982,6 +1057,7 @@ function build(prev, results, now) {
     .sort((a, b) => (b.postedAt || b.firstSeen).localeCompare(a.postedAt || a.firstSeen));
 
   const status = Object.fromEntries(Object.entries(results).map(([k, r]) => [k, { ok: r.ok, count: r.deals.length }]));
+  if (hist) status.historico = { ok: true, count: removedInflated };
   return {
     prevById,
     prevCoupons,
@@ -994,6 +1070,7 @@ function build(prev, results, now) {
       sources: status,
       stores: STORES,
       count: deals.length,
+      ...(hist ? { removedInflated } : {}),
       deals,
       radar,
       coupons,
@@ -1023,12 +1100,23 @@ function save(payload) {
 }
 
 async function main() {
+  let st = null;
+  if (HIST_FILE) {
+    HIST = await loadShared(HIST_FILE, 'history.json');
+    EXT = await loadShared(EXT_FILE, 'external-history.json');
+  }
+  if (STATE_FILE) {
+    // esgotados vistos pelo live (ou pela coleta anterior) e referências do KaBuM continuam valendo
+    st = await loadState(STATE_FILE);
+    applyState(st, MEM());
+  }
+  const hx = () => (HIST ? { hist: HIST, ext: EXT } : {});
   const prev = await loadPrevious();
   const now = new Date().toISOString();
   const results = {};
   const partial = async () => {
     if (!PARTIAL) return;
-    const { payload } = build(prev, results, new Date().toISOString());
+    const { payload } = build(prev, results, new Date().toISOString(), hx());
     payload.partial = true;
     await save(payload);
     console.log('@@partial');
@@ -1060,20 +1148,45 @@ async function main() {
   } catch (e) {
     log('fichas de placa-mãe falharam', e.message);
   }
-  const { payload, prevById, prevCoupons } = build(prev, results, now);
+  if (HIST) {
+    // Zoom/Buscapé: só para o que passou dos 50% pelo preço anunciado e cujo histórico nosso ainda não encheu
+    try {
+      const stated = build(prev, results, now).payload.deals.sort((a, b) => b.discount - a.discount);
+      await enrichExternal(stated, { hist: HIST, ext: EXT, fetchHtml: (u) => get(u, { tries: 1 }), now, log });
+      await saveJson(EXT_FILE, EXT);
+    } catch (e) {
+      log('externo falhou', e.message);
+    }
+  }
+  try {
+    await saveHistory(results);
+  } catch (e) {
+    log('histórico não foi gravado', e.message); // a coleta segue mesmo assim
+  }
+  const { payload, prevById, prevCoupons } = build(prev, results, now, hx());
   const { deals, radar, coupons } = payload;
   const newDeals = deals.filter((d) => !prevById.has(d.id));
   const newRadar = radar.filter((d) => !prevById.has(d.id));
   const newCoupons = prev.updatedAt ? coupons.filter((c) => !prevCoupons.has(c.id)) : [];
   await notify(newDeals, prev.updatedAt ? newRadar : [], newCoupons);
+  if (st) await saveJson(STATE_FILE, captureState(await loadState(STATE_FILE), MEM(), now, KEEP_HOURS));
   await save(payload);
   log(
     `total: ${deals.length} ofertas 50%+ (${newDeals.length} novas), ${radar.length} no radar, ${coupons.length} cupons` +
-      ` · expirados nesta rodada: ${EXPIRED_IDS.size} ofertas, ${EXPIRED_CODES.size} códigos`
+      ` · expirados nesta rodada: ${EXPIRED_IDS.size} ofertas, ${EXPIRED_CODES.size} códigos` +
+      (HIST ? ` · ${payload.removedInflated} removidas por preço inflado` : '')
   );
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+export {
+  siblingUrl, makeDeal, parseTelegramPost, parseTmePage, tgText, build, save, notify, get, browserHtml, log, sleep, dedupe,
+  EXPIRED_IDS, EXPIRED_CODES, COUPONS, REFS, TG_CHANNELS, MIN_DISCOUNT, KEEP_HOURS,
+};
+
+// só coleta quando executado direto (node scraper/scrape.mjs); importado pelo servidor ou pelos testes, não
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}

@@ -16,4 +16,9 @@ Ofertas de **informática com 50% de desconto ou mais**, cupons incluídos: CPU,
 
 **Expirados:** a cada coleta são apagados os itens encerrados: ofertas que o Promobit deixou de aprovar, posts do Telegram marcados como "esgotado", cupons esgotados e ofertas relâmpago do KaBuM que passaram do horário.
 
-O desconto é calculado sobre o preço "de" anunciado pela loja, então confira sempre na página antes de comprar.
+**Histórico de preços:** a cada coleta o Garimpo guarda o menor preço do dia de cada modelo, juntando todas as lojas. Da KaBuM entra todo produto lido, não só as ofertas. Ele fica publicado junto com o site (`data/history.json`, 90 dias). O desconto anunciado é conferido contra a mediana dos 30 dias antes de a oferta aparecer:
+
+- Se o desconto real fica abaixo de 50%, a oferta some da lista 50%+.
+- Posts do Radar com histórico sobem para a 50%+ se chegarem a 50% de desconto real, e saem de tudo se não chegarem.
+
+Enquanto o histórico de um modelo é curto, entra o do Zoom (o Buscapé fica de reserva), com no máximo 40 modelos por coleta. Com menos de 7 dias de dados, vale o preço "de" da loja, então confira sempre na página antes de comprar.

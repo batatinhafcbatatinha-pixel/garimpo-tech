@@ -582,3 +582,53 @@ function gpuPcie(chip) {
   return { gen, lanes };
 }
 export { fmtStorage };
+
+// ---------- Chave de modelo (histórico de preços) ----------
+// "categoria|marca|modelo", igual para o mesmo produto em lojas diferentes. null quando o título não
+// traz um código de modelo confiável (aí o item fica fora do histórico).
+const MOBO_GENERIC = new Set([
+  'amd', 'intel', 'matx', 'atx', 'eatx', 'itx', 'micro', 'mini', 'preto', 'preta', 'branco', 'branca', 'black', 'white',
+  'rev', 'com', 'e', 'de', 'para', 'placa', 'mae', 'wifi', 'wi', 'fi', 'bluetooth', 'led', 'rgb', 'argb', 'chipset',
+  'socket', 'suporta', 'ryzen', 'core', 'processadores', 'series',
+]);
+const GPU_SKIP = new Set([
+  'placa', 'de', 'video', 'geforce', 'radeon', 'nvidia', 'amd', 'intel', 'gamer', 'gaming', 'rtx', 'gtx', 'rx', 'arc',
+  'ti', 'super', 'xt', 'xtx', 'gre', 'oc', 'edition', 'com', 'e', 'para', 'pcie', 'gddr', 'nova', 'novo', 'original',
+]);
+const NOT_MODEL =
+  /^(\d+(gb|tb|mb|mhz|ghz|hz|mm|cm|w|v|pol|ms|k|p|rpm|mah|db|g)|\d+x\d+(gb)?|ddr\d\w*|gddr\d\w*|pcie\d|gen\d|usb\d\w*|m2|wifi\d\w*|bt\d|rgb\d*|lga\d+|am\d|x\d+|\d+a|\d+dpi|abnt\d?|rj\d+|ipx?\d+|hdmi\d\w*|dp\d\w*|rz\d\d)$/;
+export function modelKey(d) {
+  const brand = strip(d.brand).replace(/[^a-z0-9]+/g, '');
+  if (!d.category || !brand) return null;
+  const s = d.specs || {};
+  const t = strip(d.title);
+  if (d.category === 'cpu') return s.modelo ? `cpu|${brand}|${s.modelo.toLowerCase()}` : null;
+  if (d.category === 'gpu') {
+    if (!s.chip || !s.vram) return null;
+    // linha da placa (Dual, Ventus, Windforce, Eagle…): 1ª palavra depois da marca que não seja
+    // chip, número ou palavra genérica — antes ou depois do chip ("Gigabyte GeForce RTX 4060 Eagle OC")
+    // só o nome do produto: até a 1ª vírgula/parêntese/" - " (o resto é ficha técnica), até 6 palavras após a marca
+    const words = t.split(/[,(]| - /)[0].replace(/[^a-z0-9 ]+/g, ' ').split(' ').filter(Boolean);
+    const bi = words.findIndex((w) => w.replace(/[^a-z0-9]/g, '') === brand || w.startsWith(brand));
+    const line = bi < 0 ? null : words.slice(bi + 1, bi + 7).find((w) => !GPU_SKIP.has(w) && !/\d/.test(w) && w.length > 2) || null;
+    return ['gpu', brand, line, s.chip.toLowerCase(), `${s.vram}gb`].filter(Boolean).join('|');
+  }
+  // hífen junta o código (A620M-B → a620mb, RZ03-04700100 → rz0304700100)
+  const tokens = t.split(/[^a-z0-9-]+/).map((w) => w.replace(/-/g, '')).filter(Boolean);
+  const ci = tokens.findIndex((w) => w.length >= 4 && /[a-z]/.test(w) && /\d/.test(w) && w !== brand && !NOT_MODEL.test(w));
+  if (ci < 0) return null;
+  let code = tokens[ci];
+  // revisão logo depois do código: B650M-A II, … V2
+  if (/^(ii|iii|iv|v[2-9])$/.test(tokens[ci + 1] || '')) code += tokens[ci + 1];
+  // placa-mãe: o nome depois do chipset é o modelo (B550M Aorus Elite × B550M DS3H)
+  if (d.category === 'mobo') {
+    for (const w of tokens.slice(ci + 1, ci + 3)) {
+      if (MOBO_GENERIC.has(w) || /^(am|lga|ddr|wifi|pcie)\d/.test(w)) break;
+      code += w;
+    }
+  }
+  const cap = (d.category === 'ssd' || d.category === 'ram') && s.capacidade ? `|${s.capacidade}` : '';
+  // placa-mãe com e sem WiFi custam diferente
+  const wifi = d.category === 'mobo' && /\bwi ?-?fi\b/.test(t) ? '|wifi' : '';
+  return `${d.category}|${brand}|${code}${cap}${wifi}`;
+}

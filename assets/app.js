@@ -361,6 +361,14 @@ function card(d) {
     c.title = 'Copiar cupom';
     c.onclick = () => copy(d.coupon, c);
   }
+  if (d.hist) {
+    // conferido contra o histórico de preços (o nosso, ou o do Zoom/Buscapé enquanto o nosso enche)
+    const h = $('.hist', el);
+    h.hidden = false;
+    const src = d.hist.source === 'nosso' ? 'histórico próprio' : d.hist.source.includes('buscape') ? 'Buscapé' : 'Zoom';
+    h.textContent = `menor em 30 dias R$ ${brl(d.hist.min30)} · mediana R$ ${brl(d.hist.median30)} · ${src}`;
+    h.title = `Desconto conferido contra ${d.hist.days} dias de preço antes da oferta aparecer`;
+  }
   if (d.ref) {
     const r = $('.ref', el);
     r.hidden = false;
@@ -661,8 +669,14 @@ function renderStats() {
   const src = META.sources || {};
   const names = { promobit: 'Promobit', kabum: 'KaBuM API', amazon: 'Amazon', patoloco: 'Pato Loco', pichau: 'Pichau', terabyte: 'Terabyte', telegram: 'Telegram' };
   $('#sourceStatus').innerHTML = Object.entries(src)
+    .filter(([k]) => k !== 'historico')
     .map(([k, v]) => `<span class="src ${v.ok ? '' : 'is-off'}">${names[k] || k}: ${v.ok ? `${v.count}` : 'fora do ar'}</span>`)
     .join('');
+  if (META.removedInflated > 0)
+    $('#sourceStatus').insertAdjacentHTML(
+      'beforeend',
+      `<span class="src is-warn" title="O preço &quot;de&quot; anunciado não bate com o histórico de preços">${META.removedInflated} ofertas removidas por preço inflado</span>`
+    );
 }
 
 function syncInputs() {
