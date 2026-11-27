@@ -455,6 +455,8 @@ function renderCats() {
   const pool = POOL().filter((d) => baseFilter(d, 'cat'));
   const counts = countBy(pool, (d) => d.category);
   const nav = $('#cats');
+  // recriar os botões zera a rolagem: guarda e devolve, para a barra ficar onde o visitante deixou
+  const keep = nav.scrollLeft;
   nav.replaceChildren(
     ...CATS.map((c) => {
       const b = document.createElement('button');
@@ -466,7 +468,51 @@ function renderCats() {
       return b;
     })
   );
+  nav.scrollLeft = keep;
+  // categoria escolhida fora da área visível (ex.: link com #cat=fone): traz para a vista, uma vez
+  if (!catsShown) {
+    catsShown = true;
+    const sel = nav.querySelector('[aria-pressed="true"]');
+    if (sel) {
+      const n = nav.getBoundingClientRect(), b = sel.getBoundingClientRect();
+      if (b.left < n.left || b.right > n.right) nav.scrollLeft += b.left - n.left - 16;
+    }
+  }
 }
+let catsShown = false;
+
+// Barra de categorias: arrastar com o mouse e rolar com a rodinha (no celular o dedo já arrasta).
+(() => {
+  const nav = $('#cats');
+  let down = null, moved = false;
+  nav.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    down = { x: e.clientX, left: nav.scrollLeft };
+    moved = false;
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (!down) return;
+    const dx = e.clientX - down.x;
+    if (!moved && Math.abs(dx) < 6) return; // clique normal, não arrasto
+    moved = true;
+    nav.classList.add('is-drag');
+    nav.scrollLeft = down.left - dx;
+  });
+  window.addEventListener('pointerup', () => {
+    down = null;
+    nav.classList.remove('is-drag');
+  });
+  // depois de arrastar, soltar o botão em cima de uma categoria não deve selecioná-la
+  nav.addEventListener('click', (e) => { if (moved) { e.stopPropagation(); e.preventDefault(); moved = false; } }, true);
+  nav.addEventListener('dragstart', (e) => e.preventDefault());
+  // rodinha vertical vira rolagem lateral (só quando a barra realmente passa da tela)
+  nav.addEventListener('wheel', (e) => {
+    if (nav.scrollWidth <= nav.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    const before = nav.scrollLeft;
+    nav.scrollLeft += e.deltaY;
+    if (nav.scrollLeft !== before) e.preventDefault(); // no fim da barra, deixa a página rolar
+  }, { passive: false });
+})();
 
 function renderFacetGroup(container, title, entries) {
   if (!entries.length) return;
