@@ -30,7 +30,38 @@ Não precisa esperar a coleta acabar. As ofertas de cada fonte (KaBuM, Telegram,
 
 **Expirados:** ofertas e cupons encerrados são apagados, aqui e na versão online. São os que o Promobit deixou de aprovar, os posts do Telegram marcados como "esgotado" ou "encerrado", cupons com aviso "esgotou CÓDIGO" e ofertas relâmpago do KaBuM que passaram do horário. Itens das lojas lidas direto que sumiram da loja também saem.
 
-No seu PC a Pichau e a Terabyte funcionam: o Cloudflare libera o Chrome headless vindo de IP residencial e bloqueia o que vem dos servidores do GitHub. Precisa do Node 20+ e do Chrome ou Edge instalados. Os dados e o intervalo ficam em `data/local/`, fora do git.
+## Modo live (só no PC)
+
+Botão **Live** no topo da página. Ligado, os posts novos dos canais do Telegram entram na página e disparam os alertas em segundos, sem esperar a coleta. Serve para as lives de loja, quando a promoção esgota em minutos. Ele fica ligado até você desligar, mesmo se fechar e abrir o Garimpo.
+
+O live funciona de dois jeitos (botão do avião de papel, ao lado do Live):
+
+- **Com a sua conta do Telegram (recomendado):** o Telegram manda cada post na hora. O Garimpo não fica consultando os canais, então não há risco de o seu IP ser limitado. Para conectar:
+  1. Em [my.telegram.org/apps](https://my.telegram.org/apps), crie um app (qualquer nome) e copie o `api_id` e o `api_hash`.
+  2. No painel, preencha os dois e o seu telefone com DDI. Digite o código que chega no Telegram (e a senha, se a conta tiver verificação em duas etapas).
+
+  Cada pessoa usa a própria conta. O Garimpo só **lê** os canais da lista: não manda mensagem e só entra num canal quando você clica em **Seguir**. Os canais que a conta não segue continuam sendo lidos pela prévia pública.
+
+  A sessão fica em `data/local/telegram-session.txt`, fora do git. Ela dá acesso total à sua conta: não compartilhe esse arquivo. **Sair da conta** no painel apaga a sessão.
+- **Sem conta:** lê só a primeira página da prévia pública (`t.me/s/<canal>`) de cada canal, um de cada vez, com 2 a 5 s entre eles, e repete a cada 45 a 90 s. Se o Telegram recusar, espera 1, 2, 4, 8 minutos (até 15). Depois de 5 falhas seguidas, aquele canal fica pausado por 30 min.
+
+Para entrar com a conta, o Garimpo usa a biblioteca gramjs. O `Abrir Garimpo.bat` instala na primeira vez (`npm install`). Sem ela, o live funciona só pela prévia pública.
+
+Se uma coleta completa estiver rodando ao mesmo tempo, o que o live trouxe é reaplicado quando ela termina. Os cupons esgotados também continuam fora.
+
+## Histórico de preços (só no PC)
+
+A cada coleta o Garimpo guarda o menor preço do dia de cada modelo, juntando todas as lojas (`data/local/history.json`, 90 dias). Da KaBuM entra todo produto lido, não só as ofertas, e é isso que dá o preço normal. Preço que só sai com cupom fica guardado à parte e não entra na conta.
+
+Com isso, o desconto anunciado é conferido. A referência é a **mediana dos preços dos 30 dias antes de a oferta aparecer**. Se contra ela o desconto real fica abaixo de 50%, a oferta **some** da lista 50%+. Ela não vai para o radar nem para lugar nenhum. As que passam mostram no card "menor em 30 dias · mediana". O rodapé mostra quantas foram removidas por preço inflado.
+
+Enquanto o nosso histórico de um modelo é curto, entra também o histórico do **Zoom** (o Buscapé fica de reserva; os dois têm os mesmos dados). A consulta vale só para ofertas que passaram dos 50% pelo preço anunciado, com no máximo 40 modelos por coleta, uma consulta por vez e cache de 24 h. Quando o modelo tem preço em 20 dos últimos 30 dias no nosso histórico, o Zoom deixa de ser consultado para ele. Com menos de 7 dias de dados, a oferta segue a regra antiga (preço "de" da loja).
+
+O modelo é reconhecido pelo código no título (ex.: `5700X`, `SN770`, `G502`). Produto sem código de modelo identificável não passa por essa conferência.
+
+No seu PC a Pichau e a Terabyte funcionam: o Cloudflare libera o Chrome headless vindo de IP residencial e bloqueia o que vem dos servidores do GitHub. Precisa do Node 20+ e do Chrome ou Edge instalados. Os dados, o intervalo, o histórico e a sessão do Telegram ficam em `data/local/`, fora do git.
+
+Testes: `npm test`.
 
 ## Três visões
 
@@ -65,5 +96,5 @@ Filtros aplicados em todas as fontes: só produtos novos (descarta usado, recond
 ## Limitações
 
 - Os sites do Mercado Livre, Magalu, Shopee e GK Informática bloqueiam até navegador automatizado. ML, Shopee e Magalu chegam pelo Telegram e Promobit; a GK ainda não tem fonte.
-- O preço "de" é o que a loja anuncia, e lojas costumam inflar esse valor. Confira sempre na página antes de comprar.
+- Na versão online, e no PC enquanto o histórico de um modelo ainda é curto e o Zoom não tem esse modelo, o preço "de" é o que a loja anuncia. Lojas costumam inflar esse valor. Confira sempre na página antes de comprar.
 - Cupons de Telegram esgotam rápido e alguns valem só para itens selecionados ou no app.
