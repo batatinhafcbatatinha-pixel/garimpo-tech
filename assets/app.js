@@ -755,63 +755,107 @@ async function showNotif(d) {
   n.onclick = () => window.open(opts.data.url, '_blank');
 }
 
-let lastLoad = Date.now();
-async function poll() {
-  try {
-    const before = META.updatedAt;
-    await load();
-    lastLoad = Date.now();
-    if (META.updatedAt !== before) { renderStats(); update(); } else renderStats();
-    if (!N.on) return;
-    const fresh = ALL.filter((d) => !seen.has(d.id));
-    const freshRadar = RADAR.filter((d) => !seen.has(d.id));
-    const freshCoupons = COUPONS.filter((c) => !seen.has(c.id));
-    [...fresh, ...freshRadar, ...freshCoupons].forEach((d) => seen.add(d.id));
-    saveSeen();
-    if (N.radar) {
-      const r = freshRadar.filter((d) => (!N.cats.length || N.cats.includes(d.category)) && (!N.maxPrice || d.price <= +N.maxPrice));
-      for (const d of r.slice(0, 3)) await showNotif({ ...d, radarItem: true });
-    }
-    if (N.coupons) {
-      for (const c of freshCoupons.slice(0, 3)) await showNotif({ couponItem: true, id: c.id, title: `Cupom ${STORES[c.store]?.name}: ${c.code}`, body: c.discount || c.title || '', url: c.url || location.href });
-    }
-    const hits = fresh.filter(matchAlert).sort(SORTS.disc);
-    for (const d of hits.slice(0, 5)) await showNotif(d);
-    if (hits.length > 5) showNotif({ id: 'more', discount: hits[5].discount, title: `+${hits.length - 5} ofertas novas no Garimpo`, price: hits[5].price, oldPrice: hits[5].oldPrice, store: hits[5].store, url: location.href });
-  } catch {}
+// Confere o que chegou de novo nos dados e dispara os alertas que batem com o filtro.
+async function checkAlerts() {
+  if (!N.on) return;
+  const fresh = ALL.filter((d) => !seen.has(d.id));
+  const freshRadar = RADAR.filter((d) => !seen.has(d.id));
+  const freshCoupons = COUPONS.filter((c) => !seen.has(c.id));
+  [...fresh, ...freshRadar, ...freshCoupons].forEach((d) => seen.add(d.id));
+  saveSeen();
+  if (N.radar) {
+    const r = freshRadar.filter((d) => (!N.cats.length || N.cats.includes(d.category)) && (!N.maxPrice || d.price <= +N.maxPrice));
+    for (const d of r.slice(0, 3)) await showNotif({ ...d, radarItem: true });
+  }
+  if (N.coupons) {
+    for (const c of freshCoupons.slice(0, 3)) await showNotif({ couponItem: true, id: c.id, title: `Cupom ${STORES[c.store]?.name}: ${c.code}`, body: c.discount || c.title || '', url: c.url || location.href });
+  }
+  const hits = fresh.filter(matchAlert).sort(SORTS.disc);
+  for (const d of hits.slice(0, 5)) await showNotif(d);
+  if (hits.length > 5) showNotif({ id: 'more', discount: hits[5].discount, title: `+${hits.length - 5} ofertas novas no Garimpo`, price: hits[5].price, oldPrice: hits[5].oldPrice, store: hits[5].store, url: location.href });
 }
-function armPolling() {
-  clearInterval(pollT);
-  if (EVERY) pollT = setInterval(poll, EVERY * 60000);
-}
-$('#every').value = String(EVERY);
-$('#every').addEventListener('change', (e) => {
-  EVERY = +e.target.value;
-  store.set('every', EVERY);
-  armPolling();
-  toast(EVERY ? `A página vai buscar ofertas novas ${e.target.selectedOptions[0].text}` : 'Atualização automática desligada — use F5');
-});
-// voltou para a aba depois de muito tempo: atualiza na hora
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && EVERY && Date.now() - lastLoad > EVERY * 60000) poll();
-});
 function paintBell() { $('#notifDot').hidden = !N.on; }
+
+// ------------------------------------------------------------------ modo local (node server.mjs)
+// O servidor local coleta no intervalo escolhido aqui e avisa a página assim que termina;
+// as ofertas novas aparecem na hora, sem precisar atualizar. No GitHub Pages a coleta é diária.
+let LOCAL = null; // status do servidor local, ou null no site publicado
+const fmtMin = (iso) => {
+  const m = Math.round((new Date(iso) - Date.now()) / 60000);
+  return m <= 0 ? 'agora' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`;
+};
+function paintCollector() {
+  const up = $('#updated');
+  const label = $('span', up);
+  if (!LOCAL) {
+    up.classList.remove('is-running');
+    label.textContent = META.updatedAt ? `atualizado ${ago(META.updatedAt)} · coleta diária` : 'sem dados';
+    return;
+  }
+  up.classList.toggle('is-running', !!LOCAL.running);
+  if (LOCAL.running) {
+    label.textContent = 'coletando…';
+    up.title = LOCAL.progress || 'Coletando ofertas nas lojas';
+  } else {
+    const parts = [META.updatedAt ? `atualizado ${ago(META.updatedAt)}` : 'sem dados'];
+    if (LOCAL.nextAt) parts.push(`próxima em ${fmtMin(LOCAL.nextAt)}`);
+    label.textContent = parts.join(' · ');
+    up.title = LOCAL.lastError ? `Última coleta falhou: ${LOCAL.lastError}` : 'Última atualização dos dados';
+  }
+  $('#every').value = String(LOCAL.every);
+}
+
+async function connectLocal() {
+  try {
+    const r = await fetch('api/status', { cache: 'no-store' });
+    if (!r.ok) return false;
+    LOCAL = await r.json();
+  } catch {
+    return false;
+  }
+  $('#everyBox').hidden = false;
+  paintCollector();
+  $('#every').addEventListener('change', async (e) => {
+    const every = +e.target.value;
+    const r = await fetch('api/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ every }) });
+    if (r.ok) {
+      LOCAL = await r.json();
+      paintCollector();
+      toast(every ? `Coletando ${e.target.selectedOptions[0].text}` : 'Coleta automática desligada');
+    } else toast('Não consegui salvar o intervalo');
+  });
+  const es = new EventSource('api/events');
+  es.addEventListener('status', (ev) => { LOCAL = JSON.parse(ev.data); paintCollector(); });
+  es.addEventListener('progress', (ev) => { if (LOCAL) { LOCAL.progress = JSON.parse(ev.data).progress; paintCollector(); } });
+  // coleta terminou: mostra na hora
+  es.addEventListener('updated', async () => {
+    try {
+      await load();
+      renderStats();
+      update();
+      toast(`Coleta concluída: ${ALL.length} ofertas 50%+, ${RADAR.length} no radar`);
+      await checkAlerts();
+    } catch {}
+  });
+  return true;
+}
 
 // ------------------------------------------------------------------ boot
 (async () => {
   syncInputs();
   skeletons();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  const isLocal = /^(localhost|127\.|192\.168\.|10\.)/.test(location.hostname) && (await connectLocal());
   try {
     await load();
   } catch {
     ALL = [];
-    $('#updated span').textContent = 'erro ao carregar';
   }
   renderStats();
+  paintCollector();
+  if (!ALL.length && !RADAR.length && isLocal && LOCAL?.running) $('#updated span').textContent = 'primeira coleta… (leva alguns minutos)';
   update();
   paintBell();
-  armPolling();
-  if (N.on) poll();
-  setInterval(() => { renderStats(); }, 60000);
+  checkAlerts();
+  setInterval(() => { renderStats(); paintCollector(); }, 30000);
 })();

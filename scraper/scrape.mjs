@@ -10,14 +10,16 @@ import { writeFile, readFile, mkdir } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { detectCategory, detectBrand, extractSpecs, isNew, strip } from './classify.mjs';
 
 const MIN_DISCOUNT = +(process.env.MIN_DISCOUNT || 50);
 const KEEP_HOURS = +(process.env.KEEP_HOURS || 72);
 const RADAR_HOURS = +(process.env.RADAR_HOURS || 48);
 const COUPON_HOURS = +(process.env.COUPON_HOURS || 36);
-const OUT = new URL('../data/deals.json', import.meta.url);
+// DATA_FILE: caminho de saída (o servidor local usa data/local/deals.json)
+const OUT = process.env.DATA_FILE ? pathToFileURL(resolve(process.env.DATA_FILE)) : new URL('../data/deals.json', import.meta.url);
 const PREV_URL = process.env.PREV_URL || '';
 const NTFY_TOPIC = process.env.NTFY_TOPIC || '';
 const NTFY_MIN = +(process.env.NTFY_MIN_DISCOUNT || 60);
@@ -879,7 +881,7 @@ async function main() {
     radar,
     coupons,
   };
-  await mkdir(new URL('../data/', import.meta.url), { recursive: true });
+  await mkdir(dirname(fileURLToPath(OUT)), { recursive: true });
   await writeFile(OUT, JSON.stringify(payload));
   log(`total: ${deals.length} ofertas 50%+ (${newDeals.length} novas), ${radar.length} no radar, ${coupons.length} cupons`);
 }

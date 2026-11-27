@@ -1,11 +1,13 @@
-name: Coletar ofertas e publicar
+name: Coleta diária e publicação (branch site)
+
+# O GitHub só dispara agendamentos a partir da branch principal, por isso este arquivo fica no main.
+# O que é publicado é a branch "site": a versão online, sem o código de intervalo de coleta
+# (que só existe na versão local, no main).
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '0 12 * * *' # todo dia às 09:00 (horário de Brasília)
   workflow_dispatch:
-  push:
-    branches: [main]
 
 permissions:
   contents: read
@@ -22,19 +24,23 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: site
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: Coletar ofertas
         env:
-          # histórico: o JSON publicado na rodada anterior (mantém "visto pela 1ª vez", ofertas de 72h etc.)
+          # histórico: o JSON publicado na rodada anterior (mantém "visto pela 1ª vez", ofertas recentes etc.)
           PREV_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data/deals.json
           SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
           MIN_DISCOUNT: ${{ vars.MIN_DISCOUNT || '50' }}
           NTFY_TOPIC: ${{ vars.NTFY_TOPIC }}
           NTFY_MIN_DISCOUNT: ${{ vars.NTFY_MIN_DISCOUNT || '60' }}
-          # canais públicos do Telegram (separados por vírgula); vazio = lista padrão do coletor
           TELEGRAM_CHANNELS: ${{ vars.TELEGRAM_CHANNELS }}
+          # coleta diária: radar e cupons de loja das últimas 24 h
+          RADAR_HOURS: '30'
+          COUPON_HOURS: '30'
         run: node scraper/scrape.mjs
       - name: Montar site
         run: |

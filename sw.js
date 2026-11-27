@@ -13,7 +13,7 @@ self.addEventListener('activate', (e) => {
 // rede primeiro (dados sempre frescos), cache como plano B offline
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== location.origin) return;
+  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.includes('/api/')) return;
   e.respondWith(
     fetch(e.request)
       .then((r) => {
