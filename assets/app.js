@@ -630,11 +630,8 @@ function skeletons() {
 
 // ------------------------------------------------------------------ alertas
 const NDEF = { on: false, min: 60, max: 100, cats: [], maxPrice: '', radar: false, coupons: false };
-// De quanto em quanto tempo a página rebusca os dados (0 = só no F5). Vale para a lista e para os alertas.
-let EVERY = +store.get('every', 15);
 let N = { ...NDEF, ...store.get('alerts', {}) };
 let seen = new Set(store.get('seen', []));
-let pollT;
 
 const sheet = $('#notifSheet');
 function paintDual() {
@@ -669,10 +666,13 @@ function openSheet() {
   $('#nCoupons').checked = !!N.coupons;
   nCatsSel = [...N.cats];
   const h = $('#nEveryHint');
-  h.textContent = EVERY
-    ? `Os alertas checam junto com a atualização da página (${$('#every').selectedOptions[0].text}). Funciona com o site aberto, mesmo em segundo plano. Dica: instale como app pelo menu do Chrome.`
-    : 'A página está em “Só no F5”: os alertas só chegam quando você atualizar. Escolha um intervalo no topo da página para receber sozinho.';
-  h.className = `hint ${EVERY ? '' : 'is-warn'}`;
+  const off = LOCAL && !LOCAL.every;
+  h.textContent = !LOCAL
+    ? 'Os alertas são checados quando você abre a página.'
+    : off
+      ? 'A coleta automática está desligada (topo da página): os alertas só chegam quando houver uma coleta nova.'
+      : `Os alertas chegam assim que cada coleta termina (${$('#every').selectedOptions[0].text}). Deixe a página aberta, pode ficar em segundo plano.`;
+  h.className = `hint ${off ? 'is-warn' : ''}`;
   paintDual();
   permText();
   renderNCats();
@@ -715,7 +715,6 @@ $('#notifForm').addEventListener('submit', async (e) => {
   // ao ativar, o que já está na tela conta como visto — só avisamos do que for novo
   if (N.on) { [...ALL, ...RADAR, ...COUPONS].forEach((d) => seen.add(d.id)); saveSeen(); }
   sheet.close();
-  armPolling();
   paintBell();
   toast(N.on ? `Alertas ligados: ${N.min}–${N.max}% · ${N.cats.length ? N.cats.map((c) => CATS.find((x) => x.id === c).short).join(', ') : 'todas as categorias'}` : 'Alertas desligados');
 });
