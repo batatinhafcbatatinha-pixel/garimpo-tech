@@ -944,10 +944,13 @@ async function enrichMobos(results, prev) {
 const PARTIAL = !!process.env.PARTIAL;
 
 // ------------------------------------------------------------------ histórico de preços (só versão local)
+// Versão local: data/local/. GitHub Actions (HISTORY=1): ao lado do deals.json publicado, e a rodada
+// seguinte baixa do site (PREV_URL), como já faz com as ofertas.
 const LOCAL_DIR = process.env.DATA_FILE ? dirname(resolve(process.env.DATA_FILE)) : null;
-const HIST_FILE = LOCAL_DIR && join(LOCAL_DIR, 'history.json');
-const EXT_FILE = LOCAL_DIR && join(LOCAL_DIR, 'external-history.json');
-let HIST = null; // carregado no main() quando há DATA_FILE
+const HIST_DIR = LOCAL_DIR || (process.env.HISTORY ? dirname(fileURLToPath(OUT)) : null);
+const HIST_FILE = HIST_DIR && join(HIST_DIR, 'history.json');
+const EXT_FILE = HIST_DIR && join(HIST_DIR, 'external-history.json');
+let HIST = null; // carregado no main() quando há histórico ligado
 let EXT = {};
 const STATE_FILE = LOCAL_DIR && join(LOCAL_DIR, 'state.json');
 const MEM = () => ({ expiredIds: EXPIRED_IDS, expiredCodes: EXPIRED_CODES, refs: REFS });
@@ -959,6 +962,20 @@ function seePrice({ store, title, menu, brandHint, price, coupon = false, catego
   if (!brand) return;
   const key = modelKey({ title, category, brand, specs: specs || extractSpecs(category, title) });
   if (key) recordPrice(HIST, { key, title, category, store, price, coupon }, dayOf(new Date().toISOString()));
+}
+const siblingUrl = (url, name) => url.replace(/[^/?#]+(?:[?#].*)?$/, name);
+// arquivo local; sem ele (GitHub), o publicado na rodada anterior
+async function loadShared(file, name) {
+  const local = await loadJson(file, null);
+  if (local) return local;
+  if (PREV_URL) {
+    try {
+      return await get(`${siblingUrl(PREV_URL, name)}?t=${Date.now()}`, { json: true });
+    } catch (e) {
+      log(`${name} (url)`, e.message);
+    }
+  }
+  return {};
 }
 async function saveHistory(results) {
   if (!HIST) return;
@@ -1085,8 +1102,10 @@ function save(payload) {
 async function main() {
   let st = null;
   if (HIST_FILE) {
-    HIST = await loadJson(HIST_FILE, {});
-    EXT = await loadJson(EXT_FILE, {});
+    HIST = await loadShared(HIST_FILE, 'history.json');
+    EXT = await loadShared(EXT_FILE, 'external-history.json');
+  }
+  if (STATE_FILE) {
     // esgotados vistos pelo live (ou pela coleta anterior) e referências do KaBuM continuam valendo
     st = await loadState(STATE_FILE);
     applyState(st, MEM());
@@ -1160,7 +1179,7 @@ async function main() {
 }
 
 export {
-  makeDeal, parseTelegramPost, parseTmePage, tgText, build, save, notify, get, browserHtml, log, sleep, dedupe,
+  siblingUrl, makeDeal, parseTelegramPost, parseTmePage, tgText, build, save, notify, get, browserHtml, log, sleep, dedupe,
   EXPIRED_IDS, EXPIRED_CODES, COUPONS, REFS, TG_CHANNELS, MIN_DISCOUNT, KEEP_HOURS,
 };
 

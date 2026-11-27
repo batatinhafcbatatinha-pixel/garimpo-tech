@@ -41,6 +41,8 @@ jobs:
           # coleta diária: radar e cupons de loja das últimas 24 h
           RADAR_HOURS: '30'
           COUPON_HOURS: '30'
+          # histórico de preços: data/history.json publicado junto; a rodada seguinte baixa do site (PREV_URL)
+          HISTORY: '1'
         run: node scraper/scrape.mjs
       - name: Montar site
         run: |

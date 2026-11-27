@@ -28,3 +28,7 @@ test('post "Esgotou X" marca o código como expirado', () => {
   assert.equal(r, undefined);
   assert.ok(S.EXPIRED_CODES.has('ZB9MELI'));
 });
+
+test('histórico do GitHub vem do site publicado, ao lado do deals.json', () => {
+  assert.equal(S.siblingUrl('https://x.github.io/garimpo-tech/data/deals.json', 'history.json'), 'https://x.github.io/garimpo-tech/data/history.json');
+});
