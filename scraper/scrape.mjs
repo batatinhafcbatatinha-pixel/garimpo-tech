@@ -12,7 +12,8 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { detectCategory, detectBrand, extractSpecs, isNew, strip, moboSlotsFromSpec } from './classify.mjs';
+import { detectCategory, detectBrand, extractSpecs, isNew, strip, moboSlotsFromSpec, modelKey } from './classify.mjs';
+import { verify, recordPrice, prune, loadJson, saveJson, dayOf } from './history.mjs';
 
 const MIN_DISCOUNT = +(process.env.MIN_DISCOUNT || 50);
 const KEEP_HOURS = +(process.env.KEEP_HOURS || 72);
@@ -353,6 +354,8 @@ async function kabum() {
             price = +(a.price_with_discount || a.price);
             oldPrice = +(a.old_price || 0);
           }
+          // histórico: todo produto visto conta, não só as ofertas (é o que dá o preço normal)
+          seePrice({ store: 'kabum', title: a.title, menu: a.menu, brandHint: a.manufacturer?.name, price });
           const d = makeDeal({
             id: `kb-${it.id}`,
             store: 'kabum',
@@ -937,6 +940,30 @@ async function enrichMobos(results, prev) {
 // PARTIAL=1 (versão local): grava o resultado a cada fonte concluída e imprime "@@partial",
 // para a página mostrar as ofertas na hora. Sem PARTIAL (GitHub), grava uma vez só no fim.
 const PARTIAL = !!process.env.PARTIAL;
+
+// ------------------------------------------------------------------ histórico de preços (só versão local)
+const LOCAL_DIR = process.env.DATA_FILE ? dirname(resolve(process.env.DATA_FILE)) : null;
+const HIST_FILE = LOCAL_DIR && join(LOCAL_DIR, 'history.json');
+const EXT_FILE = LOCAL_DIR && join(LOCAL_DIR, 'external-history.json');
+let HIST = null; // carregado no main() quando há DATA_FILE
+let EXT = {};
+function seePrice({ store, title, menu, brandHint, price, coupon = false, category, brand, specs }) {
+  if (!HIST || !(price > 0) || !title) return;
+  category ||= detectCategory(title, menu);
+  if (!category) return;
+  brand ||= detectBrand(category, title, brandHint);
+  if (!brand) return;
+  const key = modelKey({ title, category, brand, specs: specs || extractSpecs(category, title) });
+  if (key) recordPrice(HIST, { key, title, category, store, price, coupon }, dayOf(new Date().toISOString()));
+}
+async function saveHistory(results) {
+  if (!HIST) return;
+  for (const r of Object.values(results))
+    for (const d of r.deals) seePrice({ store: d.store, title: d.title, price: d.price, coupon: !!d.coupon, category: d.category, brand: d.brand, specs: d.specs });
+  prune(HIST, dayOf(new Date().toISOString()));
+  await saveJson(HIST_FILE, HIST);
+  log(`histórico: ${Object.keys(HIST).length} modelos`);
+}
 const DIRECT = { kabum: 'kb-', amazon: 'az-', patoloco: 'pl-', pichau: 'pc-', terabyte: 'tb-' };
 
 function isExpired(d, nowMs) {
@@ -957,7 +984,8 @@ function reclassify(d) {
 }
 
 // Junta o que já foi coletado nesta rodada com o anterior e aplica as regras de validade.
-function build(prev, results, now) {
+// opts.hist / opts.ext (versão local): confere o desconto contra o histórico de preços e tira as infladas.
+function build(prev, results, now, { hist, ext } = {}) {
   const nowMs = Date.parse(now);
   const prevAll = [...(prev.deals || []), ...(prev.radar || [])];
   const prevById = new Map(prevAll.map((d) => [d.id, d]));
@@ -979,7 +1007,14 @@ function build(prev, results, now) {
   }
   const all = [...current.values()].filter((d) => !isExpired(d, nowMs));
   const radarCutoff = nowMs - RADAR_HOURS * 3600e3;
-  const deals = dedupe(all.filter((d) => !d.radar)).sort((a, b) => b.discount - a.discount);
+  let deals = dedupe(all.filter((d) => !d.radar));
+  let removedInflated;
+  if (hist) {
+    const v = verify(deals, hist, ext || {}, MIN_DISCOUNT);
+    deals = v.kept;
+    removedInflated = v.removed;
+  }
+  deals.sort((a, b) => b.discount - a.discount);
   const radar = dedupe(all.filter((d) => d.radar && Date.parse(d.postedAt || d.firstSeen) >= radarCutoff)).sort((a, b) =>
     (b.postedAt || b.firstSeen).localeCompare(a.postedAt || a.firstSeen)
   );
@@ -995,6 +1030,7 @@ function build(prev, results, now) {
     .sort((a, b) => (b.postedAt || b.firstSeen).localeCompare(a.postedAt || a.firstSeen));
 
   const status = Object.fromEntries(Object.entries(results).map(([k, r]) => [k, { ok: r.ok, count: r.deals.length }]));
+  if (hist) status.historico = { ok: true, count: removedInflated };
   return {
     prevById,
     prevCoupons,
@@ -1007,6 +1043,7 @@ function build(prev, results, now) {
       sources: status,
       stores: STORES,
       count: deals.length,
+      ...(hist ? { removedInflated } : {}),
       deals,
       radar,
       coupons,
@@ -1036,12 +1073,17 @@ function save(payload) {
 }
 
 async function main() {
+  if (HIST_FILE) {
+    HIST = await loadJson(HIST_FILE, {});
+    EXT = await loadJson(EXT_FILE, {});
+  }
+  const hx = () => (HIST ? { hist: HIST, ext: EXT } : {});
   const prev = await loadPrevious();
   const now = new Date().toISOString();
   const results = {};
   const partial = async () => {
     if (!PARTIAL) return;
-    const { payload } = build(prev, results, new Date().toISOString());
+    const { payload } = build(prev, results, new Date().toISOString(), hx());
     payload.partial = true;
     await save(payload);
     console.log('@@partial');
@@ -1073,7 +1115,8 @@ async function main() {
   } catch (e) {
     log('fichas de placa-mãe falharam', e.message);
   }
-  const { payload, prevById, prevCoupons } = build(prev, results, now);
+  await saveHistory(results);
+  const { payload, prevById, prevCoupons } = build(prev, results, now, hx());
   const { deals, radar, coupons } = payload;
   const newDeals = deals.filter((d) => !prevById.has(d.id));
   const newRadar = radar.filter((d) => !prevById.has(d.id));
@@ -1082,7 +1125,8 @@ async function main() {
   await save(payload);
   log(
     `total: ${deals.length} ofertas 50%+ (${newDeals.length} novas), ${radar.length} no radar, ${coupons.length} cupons` +
-      ` · expirados nesta rodada: ${EXPIRED_IDS.size} ofertas, ${EXPIRED_CODES.size} códigos`
+      ` · expirados nesta rodada: ${EXPIRED_IDS.size} ofertas, ${EXPIRED_CODES.size} códigos` +
+      (HIST ? ` · ${payload.removedInflated} removidas por preço inflado` : '')
   );
 }
 
