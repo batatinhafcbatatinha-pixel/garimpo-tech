@@ -254,4 +254,10 @@ Regras (spec): CPU → `cpu|<marca>|<specs.modelo>`; GPU → `gpu|<marca>|<linha
 
 ## Resultado do spike
 
-(preencher na Task 6)
+Feito em 2026-11-27, do PC (IP residencial):
+
+- **Zoom e Buscapé são a mesma plataforma** (mesmo Next.js, mesmos dados). Os dois responderam 200 a um `fetch` comum com user-agent de navegador: **não precisa de Chrome headless**.
+- **Busca:** `https://www.zoom.com.br/search?q=<termo>` → `__NEXT_DATA__` → `props.initialReduxState.hits.hits[]` com `name` e `url` (`/processador/<slug>`). Itens com `url` começando em `/lead?` são ofertas avulsas, não produto: ignorar.
+- **Produto:** `https://www.zoom.com.br<url>` → `__NEXT_DATA__` → `props.initialReduxState.priceHistory.priceHistory[<id>].days[]` com `{ date: "AAAA-MM-DD", price }`. **40 dias**.
+- Buscapé (`www.buscape.com.br`, mesmos caminhos) fica como reserva quando o Zoom bloquear.
+- Fixtures: `test/fixtures/zoom-search.html`, `test/fixtures/zoom-product.html`.
