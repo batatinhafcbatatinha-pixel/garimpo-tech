@@ -127,7 +127,9 @@ export function detectCategory(title, menuHint = '') {
   const t0 = t.replace(/^(baixou|corre|imperdivel|menor preco|black friday|oferta|promo|relampago|exclusivo|app)[!:.\- ]+/g, '');
   if (/^(pc|kit|combo|computador|cpu gamer|desktop)\b/.test(t0)) return null;
   const accessory = /^(capa|case|mochila|maleta|bolsa|suporte|carregador|fonte|bateria|cooler|base|memoria|ssd|tela|teclado|pelicula|adaptador|cabo|hub|dock|skin|protetor|mouse|kit)\b/;
-  const isNotebook = /\b(notebook|laptop|macbook|chromebook|ultrabook)\b/.test(t) || /\bnotebook/.test(m);
+  // linhas de notebook que às vezes vêm sem a palavra "notebook" no título
+  const nbLine = /\b(galaxy book\s?\d?|ideapad|vivobook|zenbook|expertbook|inspiron|latitude|xps 1[3-7]|aspire (go|\d)|swift (go|\d)|nitro v ?\d|predator helios|legion (5|7|pro|slim)|lenovo loq|thinkpad|thinkbook|yoga (slim|pro|\d)|victus|omen (transcend|\d)|pavilion (plus|aero|\d)|tuf gaming f\d|rog (strix|zephyrus|flow) [gm]\d|zephyrus g\d|lg gram|alienware m\d|alienware x\d|katana|cyborg 15|thin gf63|stealth \d)\b/;
+  const isNotebook = /\b(notebook|laptop|macbook|chromebook|ultrabook)\b/.test(t) || nbLine.test(t) || /\bnotebook/.test(m);
   if (isNotebook && !accessory.test(t0) && !/\bpara (notebook|laptop|macbook)\b/.test(t)) return 'notebook';
   if (/^(controle|controller|gamepad|joystick|mouse|teclado|headset|fone (de ouvido )?gamer)\b/.test(t0) && !/\b(capa|case|suporte|carregador|pad|mousepad|grip|bateria)\b/.test(t0.split(' ').slice(0, 2).join(' '))) return 'periferico';
   if (/^(gamesir|8bitdo|flydigi)\b/.test(t0) || /\b(controller|controle)\b.*\b(xbox|series x|ps5|switch|hall effect|tmr)\b/.test(t)) return 'periferico';

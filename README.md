@@ -12,6 +12,8 @@ Ofertas de **informática com 50% de desconto ou mais**, cupons incluídos: CPU,
 - **Radar de cupons:** posts de Telegram e Promobit sem preço "de".
 - **Cupons de loja:** cupons gerais das lojas.
 
-**Fontes:** KaBuM (API), Amazon, Pato Loco, Terabyte (em parte), Promobit e os canais públicos do Telegram @pcdofafapromo, @ofertasbenevides, @ofertasdecomputador, @EconoMister e @LinksBrazil. A Pichau bloqueia os servidores do GitHub. Mercado Livre, Shopee e Magalu chegam pelo Telegram e pelo Promobit.
+**Fontes:** KaBuM (API), Amazon, Pato Loco, Terabyte (em parte), Promobit e os canais públicos do Telegram @pcdofafapromo, @ofertasbenevides, @ofertasdecomputador, @EconoMister, @LinksBrazil, @gamerdasofertas e @linguicapromocoes. A Pichau bloqueia os servidores do GitHub. Mercado Livre, Shopee e Magalu chegam pelo Telegram e pelo Promobit.
+
+**Expirados:** a cada coleta são apagados os itens encerrados: ofertas que o Promobit deixou de aprovar, posts do Telegram marcados como "esgotado", cupons esgotados e ofertas relâmpago do KaBuM que passaram do horário.
 
 O desconto é calculado sobre o preço "de" anunciado pela loja, então confira sempre na página antes de comprar.
